@@ -6,6 +6,36 @@
 #include "libaktualizr/secondary_provider.h"
 #include "libaktualizr/types.h"
 
+namespace Uptane {
+class OfflineUpdateFetcher;
+}  // namespace Uptane
+
+class InstallInfo {
+ public:
+  explicit InstallInfo(UpdateType update_type = UpdateType::kOnline) : update_type_(update_type) {}
+  virtual ~InstallInfo() = default;
+  InstallInfo(const InstallInfo&) = default;
+  InstallInfo(InstallInfo&&) = default;
+  InstallInfo& operator=(const InstallInfo&) = default;
+  InstallInfo& operator=(InstallInfo&&) = default;
+
+  void initOffline(const boost::filesystem::path& images_path_offline,
+                   const boost::filesystem::path& metadata_path_offline) {
+    assert(update_type_ == UpdateType::kOffline);
+    images_path_offline_ = images_path_offline;
+    metadata_path_offline_ = metadata_path_offline;
+  }
+
+  UpdateType getUpdateType() const { return update_type_; }
+  const boost::filesystem::path& getImagesPathOffline() const { return images_path_offline_; }
+  const boost::filesystem::path& getMetadataPathOffline() const { return metadata_path_offline_; }
+
+ protected:
+  UpdateType update_type_;
+  boost::filesystem::path images_path_offline_;
+  boost::filesystem::path metadata_path_offline_;
+};
+
 class SecondaryInterface {
  public:
   SecondaryInterface() = default;
@@ -28,7 +58,14 @@ class SecondaryInterface {
   virtual data::InstallationResult putRoot(const std::string& root, bool director) = 0;
 
   virtual data::InstallationResult sendFirmware(const Uptane::Target& target) = 0;
-  virtual data::InstallationResult install(const Uptane::Target& target) = 0;
+  virtual data::InstallationResult install(const Uptane::Target& target, const InstallInfo& info) = 0;
+  virtual data::InstallationResult install(const Uptane::Target& target) { return install(target, InstallInfo()); }
+
+  // TODO: [OFFUPD] #ifdef BUILD_OFFLINE_UPDATES
+#if 1
+  virtual data::InstallationResult putMetadataOffUpd(const Uptane::Target& target,
+                                                     const Uptane::OfflineUpdateFetcher& fetcher) = 0;
+#endif
 
  protected:
   SecondaryInterface(const SecondaryInterface&) = default;

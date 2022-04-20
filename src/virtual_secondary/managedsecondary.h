@@ -66,11 +66,17 @@ class ManagedSecondary : public SecondaryInterface {
   data::InstallationResult putRoot(const std::string& root, bool director) override;
 
   data::InstallationResult sendFirmware(const Uptane::Target& target) override;
-  data::InstallationResult install(const Uptane::Target& target) override;
+  data::InstallationResult install(const Uptane::Target& target, const InstallInfo& info) override;
 
   Uptane::Manifest getManifest() const override;
 
   bool loadKeys(std::string* pub_key, std::string* priv_key);
+
+  // TODO: [OFFUPD] #ifdef BUILD_OFFLINE_UPDATES
+#if 1
+  data::InstallationResult putMetadataOffUpd(const Uptane::Target& target,
+                                             const Uptane::OfflineUpdateFetcher& fetcher) override;
+#endif
 
  protected:
   ManagedSecondary(ManagedSecondary&&) = default;

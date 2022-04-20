@@ -122,6 +122,11 @@ class Aktualizr {
   std::future<void> SendDeviceData(const Json::Value &hwinfo);
 
   /**
+   * Complete previous secondary updates if any is pending.
+   */
+  std::future<void> CompleteSecondaryUpdates();
+
+  /**
    * Fetch Uptane metadata and check for updates.
    * This collects a client manifest, PUTs it to the director, updates the
    * Uptane metadata (including root and targets), and then checks the metadata
@@ -213,6 +218,42 @@ class Aktualizr {
    * @throw std::system_error (failure to lock a mutex)
    */
   std::future<result::Install> Install(const std::vector<Uptane::Target>& updates);
+
+  // TODO: [OFFUPD] Protect with an #ifdef:
+  //       For this to work correctly the compilation options should be exactly
+  //       the same in aktualizr-torizon but they aren't ATM
+  // BUILD_OFFLINE_UPDATES {{
+#if 1
+  /**
+   * TODO: [OFFUPD] Remove after MVP.
+   * Check if an offline-update is available.
+   */
+  bool OfflineUpdateAvailable();
+
+  /**
+   * TODO: [OFFUPD] Remove after MVP.
+   * Counterpart of CheckUpdates() for the offline-update case.
+   */
+  std::future<result::UpdateCheck> CheckUpdatesOffline(const boost::filesystem::path &source_path);
+
+  /**
+   * TODO: [OFFUPD] Explain.
+   * Counterpart of Download() for the offline-update case.
+   */
+  std::future<result::Download> FetchImagesOffline(const std::vector<Uptane::Target> &updates);
+
+  /**
+   * TODO: [OFFUPD] Explain.
+   * Counterpart of Install() for the offline-update case.
+   */
+  std::future<result::Install> InstallOffline(const std::vector<Uptane::Target>& updates);
+
+  /**
+   * TODO: [OFFUPD] Explain.
+   * Counterpart of UptaneCycle() for the offline-update case.
+   */
+  bool CheckAndInstallOffline(const boost::filesystem::path &source_path);
+#endif
 
   /**
    * SetInstallationRawReport allows setting a custom raw report field in the device installation result.
@@ -351,6 +392,17 @@ class Aktualizr {
   // Make sure this is declared before SotaUptaneClient to prevent Valgrind
   // complaints with destructors.
   Config config_;
+
+  /**
+   * TODO: [OFFUPD] Remove after MVP.
+   */
+  enum class OffUpdSourceState {
+    Unknown,
+    SourceDoesNotExist,
+    SourceExistsNoContent,
+    SourceExists,
+  };
+  OffUpdSourceState offupd_source_state_{OffUpdSourceState::SourceDoesNotExist};
 
  protected:
   Aktualizr(Config config, std::shared_ptr<INvStorage> storage_in, const std::shared_ptr<HttpInterface>& http_in);

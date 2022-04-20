@@ -5,7 +5,7 @@
 namespace Uptane {
 
 Targets getTrustedDelegation(const Role &delegate_role, const Targets &parent_targets,
-                             const ImageRepository &image_repo, INvStorage &storage, Fetcher &fetcher,
+                             const ImageRepository &image_repo, INvStorage &storage, IMetadataFetcher &fetcher,
                              const bool offline) {
   std::string delegation_meta;
   auto version_in_snapshot = image_repo.getRoleVersion(delegate_role);

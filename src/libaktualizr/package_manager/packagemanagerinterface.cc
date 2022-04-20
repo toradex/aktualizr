@@ -1,4 +1,5 @@
 #include <sys/statvfs.h>
+#include <algorithm>
 #include <chrono>
 
 #include "libaktualizr/packagemanagerinterface.h"
@@ -182,6 +183,88 @@ bool PackageManagerInterface::fetchTarget(const Uptane::Target& target, Uptane::
   }
   return result;
 }
+
+#ifdef BUILD_OFFLINE_UPDATES
+bool PackageManagerInterface::fetchTargetOffUpd(const Uptane::Target& target,
+                                                const Uptane::OfflineUpdateFetcher& fetcher, const KeyManager& keys,
+                                                const FetcherProgressCb& progress_cb,
+                                                const api::FlowControlToken* token) {
+  // TODO: [OFFUPD] Test this function with large files.
+  (void)keys;
+  bool result = false;
+  try {
+    if (target.hashes().empty()) {
+      throw Uptane::Exception("image", "No hash defined for the target");
+    }
+    TargetStatus exists = PackageManagerInterface::verifyTarget(target);
+    if (exists == TargetStatus::kGood) {
+      LOG_INFO << "Image already fetched; skipping fetching";
+      return true;
+    }
+    std::unique_ptr<DownloadMetaStruct> ds = std_::make_unique<DownloadMetaStruct>(target, progress_cb, token);
+
+    LOG_INFO << "Initiating fetching of file " << target.filename();
+    if (!checkAvailableDiskSpace(target.length())) {
+      throw std::runtime_error("Insufficient disk space available to fetch target");
+    }
+
+    ds->fhandle = createTargetFile(target);
+
+    boost::filesystem::path source_path = fetcher.getImagesPath() / target.filename();
+    std::ifstream source(source_path.string(), std::ios::binary);
+    if (!source.good()) {
+      throw std::runtime_error("Can't read file " + source_path.string());
+    }
+
+    typedef std::vector<uint8_t> BufferType;
+    auto buffer = std_::make_unique<BufferType>(std::min(uint64_t(64 * 1024), target.length() + 1));
+
+    for (;;) {
+      source.read(reinterpret_cast<char*>(buffer->data()), buffer->size());
+
+      // This is equivalent to the work done by DownloadHandler in the online case.
+      if ((ds->downloaded_length + source.gcount()) > target.length()) {
+        LOG_WARNING << "File " << target.filename() << " is bigger than expected";
+        break;
+      }
+      ds->fhandle.write(reinterpret_cast<char*>(buffer->data()), source.gcount());
+      ds->hasher().update(reinterpret_cast<unsigned char*>(buffer->data()), source.gcount());
+      ds->downloaded_length += source.gcount();
+
+      // This is equivalent to the work done by ProgressHandler in the online case.
+      auto progress = static_cast<unsigned int>((ds->downloaded_length * 100) / target.length());
+      if (ds->progress_cb && (progress > ds->last_progress)) {
+        ds->last_progress = progress;
+        ds->progress_cb(ds->target, "Fetching", progress);
+      }
+
+      if (!source.gcount()) {
+        break;
+      }
+      if (!token->canContinue()) {
+        throw Uptane::Exception("image", "Fetching of a target was aborted");
+      }
+    }
+
+    ds->fhandle.close();
+    if (!ds->fhandle) {
+      // An write error is assumed to be due to file size like in the online case.
+      throw Uptane::OversizedTarget(target.filename());
+    }
+
+    if (!target.MatchHash(Hash(ds->hash_type, ds->hasher().getHexDigest()))) {
+      removeTargetFile(target);
+      throw Uptane::TargetHashMismatch(target.filename());
+    }
+    result = true;
+
+  } catch (const std::exception& e) {
+    LOG_WARNING << "Error while fetching a target: " << e.what();
+  }
+  LOG_DEBUG << "Fetch status for file " << target.filename() << " is " << result;
+  return result;
+}
+#endif
 
 TargetStatus PackageManagerInterface::verifyTarget(const Uptane::Target& target) const {
   auto target_exists = checkTargetFile(target);
