@@ -31,7 +31,7 @@ void OfflineUpdateFetcher::fetchRole(std::string* result, int64_t maxsize, Repos
     throw Uptane::MetadataFetchFailure(repo.ToString(), path.string());
   }
 
-  boost::filesystem::ifstream file_input(path);
+  std::ifstream file_input(path.c_str());
   file_input.seekg(0, file_input.end);
   int64_t file_size = file_input.tellg();
   // [OFFUPD] Maybe throw a better error here?
