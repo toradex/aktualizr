@@ -12,6 +12,9 @@
 #include "uptane/exceptions.h"
 #include "utilities/utils.h"
 
+// Fields to ignore from image-repo custom metadata when merging it with the one from the director.
+static const std::vector<std::string> IMAGE_REPO_MERGE_IGNORE{"hardwareIds", "targetFormat", "uri"};
+
 static void report_progress_cb(event::Channel *channel, const Uptane::Target &target, const std::string &description,
                                unsigned int progress) {
   if (channel == nullptr) {
@@ -993,11 +996,14 @@ result::UpdateCheck SotaUptaneClient::checkUpdates(UpdateType utype) {
         LOG_ERROR << "No matching target in Image repo Targets metadata for " << target;
         throw Uptane::TargetMismatch(target.filename());
       }
-      // If the URL from the Director is unset, but the URL from the Image repo
-      // is set, use that.
+      // If the URL from the Director is unset, but the URL from the Image repo is set, use that.
       if (target.uri().empty() && !image_target->uri().empty()) {
         target.setUri(image_target->uri());
       }
+      // Merge custom metadata giving a higher priority to data from the director.
+      Json::Value custom_new =
+          utils::MergeJson(target.custom_data(), image_target->custom_data(), &IMAGE_REPO_MERGE_IGNORE);
+      target.updateCustom(custom_new);
     }
   } catch (const std::exception &e) {
     last_exception = std::current_exception();
@@ -1247,6 +1253,8 @@ void SotaUptaneClient::completeInstall() {
 void SotaUptaneClient::completePreviousSecondaryUpdates() {
   if (hasPendingUpdates()) {
     LOG_INFO << "The current update is pending. Check if secondaries have already been updated";
+    // TODO: [TORIZON] Maybe here we should determine what secondaries have pending updates and
+    // then wait for them to be online by doing something similar to `waitSecondariesReachable()`.
     checkAndUpdatePendingSecondaries();
   }
 }
@@ -1580,6 +1588,40 @@ void SotaUptaneClient::checkAndUpdatePendingSecondaries() {
       continue;
     }
     auto &sec = secondaries[pending_ecu.first];
+
+    // Give secondaries a chance to complete the last install: this is likely useful mostly to virtual secondaries.
+    {
+      const Uptane::EcuSerial &serial = pending_ecu.first;
+      boost::optional<Uptane::Target> pending_version;
+      storage->loadInstalledVersions(serial.ToString(), nullptr, &pending_version);
+
+      auto opt_install_res = sec->completePendingInstall(*pending_version);
+      if (opt_install_res) {
+        if (opt_install_res->isSuccess()) {
+          // Follow with normal process, i.e. use manifest to confirm installation.
+        } else if (opt_install_res->needCompletion()) {
+          LOG_INFO << "Update " << pending_ecu.second << " remains pending on Secondary with serial "
+                   << pending_ecu.first;
+          continue;
+        } else {
+          // Failure detected by secondary; clear pending state.
+          LOG_INFO << "Pending update " << pending_ecu.second << " failed to complete on Secondary with serial "
+                   << pending_ecu.first;
+          storage->saveEcuInstallationResult(serial, *opt_install_res);
+          storage->saveInstalledVersion(serial.ToString(), *pending_version, InstalledVersionUpdateMode::kNone);
+
+          report_queue->enqueue(std_::make_unique<EcuInstallationCompletedReport>(
+              pending_ecu.first, pending_version->correlation_id(), false));
+
+          data::InstallationResult ir;
+          std::string raw_report;
+          computeDeviceInstallationResult(&ir, &raw_report);
+          storage->storeDeviceInstallationResult(ir, raw_report, pending_version->correlation_id());
+          continue;
+        }
+      }
+    }
+
     Uptane::Manifest manifest;
     try {
       manifest = sec->getManifest();
@@ -1602,6 +1644,7 @@ void SotaUptaneClient::checkAndUpdatePendingSecondaries() {
                 << " serial: " << pending_ecu.first << " manifest: " << manifest;
       continue;
     }
+
     auto current_ecu_hash = manifest.installedImageHash();
     if (pending_ecu.second == current_ecu_hash) {
       LOG_INFO << "The pending update " << current_ecu_hash << " has been installed on " << pending_ecu.first;

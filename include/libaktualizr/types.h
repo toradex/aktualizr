@@ -3,6 +3,7 @@
 /** \file */
 
 #include <algorithm>
+#include <istream>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -52,6 +53,9 @@ class BasedPath {
  private:
   boost::filesystem::path p_;
 };
+
+Json::Value MergeJson(const Json::Value &main, const Json::Value &other,
+                      const std::vector<std::string> *other_ignore = nullptr);
 
 }  // namespace utils
 
@@ -175,6 +179,7 @@ class Hash {
   enum class Type { kSha256, kSha512, kUnknownAlgorithm };
 
   static Hash generate(Type type, const std::string &data);
+  static Hash generate(Type type, std::istream &source, ssize_t *nread = nullptr);
   Hash(const std::string &type, const std::string &hash);
   Hash(Type type, const std::string &hash);
 
@@ -499,6 +504,23 @@ static inline std::string VerificationTypeToString(const VerificationType vtype)
       break;
   }
   return type_s;
+}
+
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
+static inline std::string UpdateTypeToString(const UpdateType utype) {
+  std::string utype_str;
+  switch (utype) {
+    case UpdateType::kOnline:
+      utype_str = "online";
+      break;
+    case UpdateType::kOffline:
+      utype_str = "offline";
+      break;
+    default:
+      utype_str = "<unknown>";
+      break;
+  }
+  return utype_str;
 }
 
 }  // namespace Uptane
