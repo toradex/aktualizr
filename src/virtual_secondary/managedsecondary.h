@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include <boost/filesystem.hpp>
+#include <boost/filesystem/path.hpp>
 #include "json/json.h"
 
 #include "libaktualizr/secondaryinterface.h"
@@ -70,10 +70,11 @@ class ManagedSecondary : public SecondaryInterface {
 
   Uptane::Manifest getManifest() const override;
 
+  // Public for testing only
   bool loadKeys(std::string* pub_key, std::string* priv_key);
+  int storeKeysCount() const { return did_store_keys; }
 
-  // TODO: [OFFUPD] #ifdef BUILD_OFFLINE_UPDATES
-#if 1
+#ifdef BUILD_OFFLINE_UPDATES
   data::InstallationResult putMetadataOffUpd(const Uptane::Target& target,
                                              const Uptane::OfflineUpdateFetcher& fetcher) override;
 #endif
@@ -91,6 +92,7 @@ class ManagedSecondary : public SecondaryInterface {
  private:
   void storeKeys(const std::string& pub_key, const std::string& priv_key);
 
+  int did_store_keys{0};  // For testing
   std::unique_ptr<Uptane::DirectorRepository> director_repo_;
   std::unique_ptr<Uptane::ImageRepository> image_repo_;
   PublicKey public_key_;

@@ -1,11 +1,16 @@
 #ifndef UPTANE_REPOSITORY_H_
 #define UPTANE_REPOSITORY_H_
 
-#include "fetcher.h"
+#include <cstdint>               // for int64_t
+#include <string>                // for string
+#include "libaktualizr/types.h"  // for TimeStamp
+#include "uptane/tuf.h"          // for Root, RepositoryType
 
 class INvStorage;
 
 namespace Uptane {
+class IMetadataFetcher;
+class OfflineUpdateFetcher;
 
 class RepositoryCommon {
  public:
@@ -21,11 +26,7 @@ class RepositoryCommon {
   int rootVersion() const { return root.version(); }
   bool rootExpired() const { return root.isExpired(TimeStamp::Now()); }
   virtual void updateMeta(INvStorage &storage, const IMetadataFetcher &fetcher) = 0;
-  // TODO: [OFFUPD] Protect with an #ifdef:
-  //       For this to work correctly the compilation options should be exactly
-  //       the same in aktualizr-torizon but they aren't ATM
-  // BUILD_OFFLINE_UPDATES {{
-#if 1
+#ifdef BUILD_OFFLINE_UPDATES
   virtual void updateMetaOffUpd(INvStorage &storage, const OfflineUpdateFetcher &fetcher) = 0;
 #endif
 

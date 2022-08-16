@@ -1,6 +1,7 @@
 #ifndef PACKAGEMANAGERINTERFACE_H_
 #define PACKAGEMANAGERINTERFACE_H_
 
+#include <fstream>
 #include <mutex>
 #include <string>
 
@@ -61,11 +62,7 @@ class PackageManagerInterface {
   virtual void updateNotify() {}
   virtual bool fetchTarget(const Uptane::Target& target, Uptane::Fetcher& fetcher, const KeyManager& keys,
                            const FetcherProgressCb& progress_cb, const api::FlowControlToken* token);
-  // TODO: [OFFUPD] Protect with an #ifdef:
-  //       For this to work correctly the compilation options should be exactly
-  //       the same in aktualizr-torizon but they aren't ATM
-  // BUILD_OFFLINE_UPDATES {{
-#if 1
+#ifdef BUILD_OFFLINE_UPDATES
   virtual bool fetchTargetOffUpd(const Uptane::Target& target, const Uptane::OfflineUpdateFetcher& fetcher,
                                  const KeyManager& keys, const FetcherProgressCb& progress_cb,
                                  const api::FlowControlToken* token);

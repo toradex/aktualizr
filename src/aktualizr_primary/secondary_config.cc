@@ -1,3 +1,4 @@
+#include <boost/filesystem.hpp>
 #include <fstream>
 #include <iostream>
 #include <unordered_map>
@@ -121,6 +122,16 @@ void JsonConfigParser::createVirtualSecondariesCfg(Configs& configs, const Json:
     configs.push_back(virtual_config);
   }
 }
+
+#ifdef TORIZON
+void JsonConfigParser::createDockerComposeSecondariesCfg(Configs& configs,
+                                                         const Json::Value& json_docker_compose_sec_cfg) {
+  for (const auto& json_config : json_docker_compose_sec_cfg) {
+    auto docker_compose_config = std::make_shared<DockerComposeSecondaryConfig>(json_config);
+    configs.push_back(docker_compose_config);
+  }
+}
+#endif
 
 #ifdef BUILD_GENERIC_SECONDARY
 void JsonConfigParser::createTorizonGenericSecondariesCfg(Configs& configs, const Json::Value& json_torgen_sec_cfg) {

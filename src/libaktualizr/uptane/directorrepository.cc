@@ -1,6 +1,10 @@
 #include "directorrepository.h"
 
+#include "fetcher.h"
+#include "logging/logging.h"
 #include "storage/invstorage.h"
+#include "uptane/exceptions.h"
+#include "utilities/utils.h"
 
 #include <boost/filesystem.hpp>
 
@@ -10,7 +14,9 @@ void DirectorRepository::resetMeta() {
   resetRoot();
   targets = Targets();
   latest_targets = Targets();
+#ifdef BUILD_OFFLINE_UPDATES
   offline_snapshot = Snapshot();
+#endif
 }
 
 void DirectorRepository::checkTargetsExpired(UpdateType utype) {
