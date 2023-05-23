@@ -591,10 +591,12 @@ class SecondaryInterfaceMock : public SecondaryInterface {
   data::InstallationResult putRoot(const std::string &, bool) override {
     return data::InstallationResult(data::ResultCode::Numeric::kOk, "");
   }
-  virtual data::InstallationResult sendFirmware(const Uptane::Target &) override {
+  virtual data::InstallationResult sendFirmware(const Uptane::Target &, const InstallInfo &,
+                                                const api::FlowControlToken *) override {
     return data::InstallationResult(data::ResultCode::Numeric::kOk, "");
   }
-  virtual data::InstallationResult install(const Uptane::Target &, const InstallInfo &) override {
+  virtual data::InstallationResult install(const Uptane::Target &, const InstallInfo &,
+                                           const api::FlowControlToken *) override {
     return data::InstallationResult(data::ResultCode::Numeric::kOk, "");
   }
   data::InstallationResult putMetadataOffUpd(const Uptane::Target &target,
@@ -815,19 +817,19 @@ class HttpFakeProv : public HttpFake {
         }
         break;
       case 5:
+        /* Send EcuInstallationStartedReport to server for secondaries. */
+        EXPECT_EQ(event_type, "EcuInstallationStarted");
+        EXPECT_EQ(serial, "secondary_ecu_serial");
+        break;
+      case 6:
         /* Send EcuInstallationStartedReport to server for Primary. */
         EXPECT_EQ(event_type, "EcuInstallationStarted");
         EXPECT_EQ(serial, "CA:FE:A6:D2:84:9D");
         break;
-      case 6:
+      case 7:
         /* Send EcuInstallationCompletedReport to server for Primary. */
         EXPECT_EQ(event_type, "EcuInstallationCompleted");
         EXPECT_EQ(serial, "CA:FE:A6:D2:84:9D");
-        break;
-      case 7:
-        /* Send EcuInstallationStartedReport to server for secondaries. */
-        EXPECT_EQ(event_type, "EcuInstallationStarted");
-        EXPECT_EQ(serial, "secondary_ecu_serial");
         break;
       case 8:
         /* Send EcuInstallationCompletedReport to server for secondaries. */

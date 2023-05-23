@@ -57,13 +57,42 @@ class SecondaryInterface {
   virtual int32_t getRootVersion(bool director) const = 0;
   virtual data::InstallationResult putRoot(const std::string& root, bool director) = 0;
 
-  virtual data::InstallationResult sendFirmware(const Uptane::Target& target) = 0;
-  virtual data::InstallationResult install(const Uptane::Target& target, const InstallInfo& info) = 0;
-  virtual data::InstallationResult install(const Uptane::Target& target) { return install(target, InstallInfo()); }
+  /**
+   * Send firmware to a device. This operation should be both idempotent and
+   * not commit to installing the new version. Where practical, the
+   * implementation should pre-flight the installation and report errors now,
+   * while the entire installation can be cleanly aborted.
+   * Failures reported later (during SecondaryInterface::install()) can leave
+   * a multi-ecu update partially applied.
+   */
+  virtual data::InstallationResult sendFirmware(const Uptane::Target& target, const InstallInfo& install_info,
+                                                const api::FlowControlToken* flow_control) = 0;
+
+  /**
+   * Commit to installing an update.
+   */
+  virtual data::InstallationResult install(const Uptane::Target& target, const InstallInfo& info,
+                                           const api::FlowControlToken* flow_control) = 0;
+
+  /**
+   * Perform housekeeping after reboot if there isn't a pending installation.
+   * If there is a pending install, then completePendingInstall() will be
+   * called instead.
+   */
+  virtual void cleanStartup() {}
+
+  /**
+   * If the new firmware isn't available until after a reboot, then this
+   * is called on the first reboot.
+   */
   virtual boost::optional<data::InstallationResult> completePendingInstall(const Uptane::Target& target) {
     (void)target;
     return boost::none;
   }
+
+  /**
+   * Called after completePendingInstall if the install failed.
+   */
   virtual void rollbackPendingInstall() {}
 
 #ifdef BUILD_OFFLINE_UPDATES
