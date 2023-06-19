@@ -207,40 +207,45 @@ TEST_F(TorizonGenericSecondaryTest, GetFirmwareInfoFailure) {
   LOG_DEBUG << "getFirmwareInfo: action-handler ends due to signal";
   {
     Uptane::InstalledImageInfo firmware_info;
+    Json::Value custom_meta;
     setenv("TEST_COMMAND", "terminate-with-signal-TERM");
-    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info), false);
+    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info, custom_meta), false);
   }
 
   LOG_DEBUG << "getFirmwareInfo: action-handler produces bad output";
   {
     Uptane::InstalledImageInfo firmware_info;
+    Json::Value custom_meta;
     setenv("TEST_COMMAND", "exit-with-json-output-code-0");
     setenv("TEST_JSON_OUTPUT", "{\"value\":}");
-    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info), false);
+    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info, custom_meta), false);
   }
 
   LOG_DEBUG << "getFirmwareInfo: action-handler requests error processing";
   {
     Uptane::InstalledImageInfo firmware_info;
+    Json::Value custom_meta;
     setenv("TEST_COMMAND", "exit-with-json-output-code-65");
     setenv("TEST_JSON_OUTPUT", "{\"value\":\"test\"}");
-    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info), false);
+    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info, custom_meta), false);
   }
 
   LOG_DEBUG << "getFirmwareInfo: action-handler outputs failure status";
   {
     Uptane::InstalledImageInfo firmware_info;
+    Json::Value custom_meta;
     setenv("TEST_COMMAND", "exit-with-json-output-code-0");
     setenv("TEST_JSON_OUTPUT", "{\"status\":\"failed\"}");
-    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info), false);
+    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info, custom_meta), false);
   }
 
   LOG_DEBUG << "getFirmwareInfo: action-handler outputs bad status";
   {
     Uptane::InstalledImageInfo firmware_info;
+    Json::Value custom_meta;
     setenv("TEST_COMMAND", "exit-with-json-output-code-0");
     setenv("TEST_JSON_OUTPUT", "{\"status\":\"weird-status\"}");
-    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info), false);
+    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info, custom_meta), false);
   }
 }
 
@@ -252,9 +257,10 @@ TEST_F(TorizonGenericSecondaryTest, GetFirmwareInfoSuccess) {
   {
     // In this test case no firmware file/name is present in the temporary test directory.
     Uptane::InstalledImageInfo firmware_info;
+    Json::Value custom_meta;
     setenv("TEST_COMMAND", "exit-with-json-output-code-0");
     setenv("TEST_JSON_OUTPUT", "{\"status\": \"ok\", \"message\": \"user message\"}");
-    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info), true);
+    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info, custom_meta), true);
     EXPECT_EQ(firmware_info.name, "noimage");
     // Following is the SHA-256 of an empty file.
     EXPECT_EQ(firmware_info.hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
@@ -273,9 +279,10 @@ TEST_F(TorizonGenericSecondaryTest, GetFirmwareInfoSuccess) {
     }
 
     Uptane::InstalledImageInfo firmware_info;
+    Json::Value custom_meta;
     setenv("TEST_COMMAND", "exit-with-json-output-code-0");
     setenv("TEST_JSON_OUTPUT", "{\"status\": \"ok\", \"message\": \"user message\"}");
-    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info), true);
+    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info, custom_meta), true);
     EXPECT_EQ(firmware_info.name, tgtname);
     // Following is the SHA-256 of an empty file.
     EXPECT_EQ(firmware_info.hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
@@ -301,9 +308,10 @@ TEST_F(TorizonGenericSecondaryTest, GetFirmwareInfoSuccess) {
     const std::string expected_hash = getSha256Sum(sconfig_->firmware_path);
 
     Uptane::InstalledImageInfo firmware_info;
+    Json::Value custom_meta;
     setenv("TEST_COMMAND", "exit-with-json-output-code-0");
     setenv("TEST_JSON_OUTPUT", "{\"status\": \"ok\", \"message\": \"user message\"}");
-    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info), true);
+    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info, custom_meta), true);
     EXPECT_EQ(firmware_info.name, tgtname);
     EXPECT_EQ(firmware_info.hash, expected_hash);
     EXPECT_EQ(firmware_info.len, fwsize);
@@ -328,11 +336,12 @@ TEST_F(TorizonGenericSecondaryTest, GetFirmwareInfoSuccess) {
     const std::string expected_hash = getSha256Sum(sconfig_->firmware_path);
 
     Uptane::InstalledImageInfo firmware_info;
+    Json::Value custom_meta;
     setenv("TEST_COMMAND", "exit-with-json-output-code-0");
     setenv("TEST_JSON_OUTPUT",
            "{\"status\": \"ok\", \"message\": \"user message\", "
            "\"sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}");
-    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info), true);
+    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info, custom_meta), true);
     EXPECT_EQ(firmware_info.name, tgtname);
     EXPECT_EQ(firmware_info.hash, expected_hash);
     EXPECT_EQ(firmware_info.len, fwsize);
@@ -357,9 +366,10 @@ TEST_F(TorizonGenericSecondaryTest, GetFirmwareInfoSuccess) {
     const std::string expected_hash = getSha256Sum(sconfig_->firmware_path);
 
     Uptane::InstalledImageInfo firmware_info;
+    Json::Value custom_meta;
     setenv("TEST_COMMAND", "exit-with-json-output-code-0");
     setenv("TEST_JSON_OUTPUT", "{\"status\": \"ok\", \"message\": \"user message\", \"length\": 1234}");
-    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info), true);
+    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info, custom_meta), true);
     EXPECT_EQ(firmware_info.name, tgtname);
     EXPECT_EQ(firmware_info.hash, expected_hash);
     EXPECT_EQ(firmware_info.len, fwsize);
@@ -384,11 +394,12 @@ TEST_F(TorizonGenericSecondaryTest, GetFirmwareInfoSuccess) {
     // const std::string correct_hash = getSha256Sum(config_->firmware_path);
 
     Uptane::InstalledImageInfo firmware_info;
+    Json::Value custom_meta;
     setenv("TEST_COMMAND", "exit-with-json-output-code-0");
     setenv("TEST_JSON_OUTPUT",
            "{\"status\": \"ok\", \"message\": \"user message\", "
            "\"sha256\": \"a1b2c3\", \"length\": 1234}");
-    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info), true);
+    EXPECT_EQ(secondary_->getFirmwareInfo(firmware_info, custom_meta), true);
     EXPECT_EQ(firmware_info.name, tgtname);
     EXPECT_EQ(firmware_info.hash, "a1b2c3");
     EXPECT_EQ(firmware_info.len, 1234);
