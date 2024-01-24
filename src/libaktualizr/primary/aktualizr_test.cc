@@ -70,7 +70,10 @@ TEST(Aktualizr, FullNoUpdates) {
     }
     LOG_INFO << "Got " << event->variant;
     switch (ev_state.num_events) {
-      case 0: {
+      case 0:
+        ASSERT_EQ(event->variant, "SendDeviceDataComplete");
+        break;
+      case 1: {
         ASSERT_EQ(event->variant, "UpdateCheckComplete");
         const auto targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
         EXPECT_EQ(targets_event->result.ecus_count, 0);
@@ -78,7 +81,7 @@ TEST(Aktualizr, FullNoUpdates) {
         EXPECT_EQ(targets_event->result.status, result::UpdateStatus::kNoUpdatesAvailable);
         break;
       }
-      case 1: {
+      case 2: {
         ASSERT_EQ(event->variant, "UpdateCheckComplete");
         const auto targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
         EXPECT_EQ(targets_event->result.ecus_count, 0);
@@ -258,7 +261,10 @@ TEST(Aktualizr, FullWithUpdates) {
     }
     LOG_INFO << "Got " << event->variant;
     switch (ev_state.num_events) {
-      case 0: {
+      case 0:
+        EXPECT_EQ(event->variant, "SendDeviceDataComplete");
+        break;
+      case 1: {
         ASSERT_EQ(event->variant, "UpdateCheckComplete");
         const auto targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
         EXPECT_EQ(targets_event->result.ecus_count, 2);
@@ -268,8 +274,8 @@ TEST(Aktualizr, FullWithUpdates) {
         EXPECT_EQ(targets_event->result.status, result::UpdateStatus::kUpdatesAvailable);
         break;
       }
-      case 1:
-      case 2: {
+      case 2:
+      case 3: {
         ASSERT_EQ(event->variant, "DownloadTargetComplete");
         const auto download_event = dynamic_cast<event::DownloadTargetComplete*>(event.get());
         EXPECT_TRUE(download_event->update.filename() == "primary_firmware.txt" ||
@@ -277,7 +283,7 @@ TEST(Aktualizr, FullWithUpdates) {
         EXPECT_TRUE(download_event->success);
         break;
       }
-      case 3: {
+      case 4: {
         ASSERT_EQ(event->variant, "AllDownloadsComplete");
         const auto downloads_complete = dynamic_cast<event::AllDownloadsComplete*>(event.get());
         EXPECT_EQ(downloads_complete->result.updates.size(), 2);
@@ -288,7 +294,7 @@ TEST(Aktualizr, FullWithUpdates) {
         EXPECT_EQ(downloads_complete->result.status, result::DownloadStatus::kSuccess);
         break;
       }
-      case 4: {
+      case 5: {
         // Downloads to secondaries run first (Not a requirement, just how it
         // works at present)
         ASSERT_EQ(event->variant, "InstallStarted");
@@ -296,14 +302,14 @@ TEST(Aktualizr, FullWithUpdates) {
         EXPECT_EQ(install_started->serial.ToString(), "secondary_ecu_serial");
         break;
       }
-      case 5: {
+      case 6: {
         // Primary always gets installed
         ASSERT_EQ(event->variant, "InstallStarted");
         const auto install_started = dynamic_cast<event::InstallStarted*>(event.get());
         EXPECT_EQ(install_started->serial.ToString(), "CA:FE:A6:D2:84:9D");
         break;
       }
-      case 6: {
+      case 7: {
         // Primary should complete before Secondary begins. (Again not a
         // requirement per se.)
         ASSERT_EQ(event->variant, "InstallTargetComplete");
@@ -312,14 +318,14 @@ TEST(Aktualizr, FullWithUpdates) {
         EXPECT_TRUE(install_complete->success);
         break;
       }
-      case 7: {
+      case 8: {
         ASSERT_EQ(event->variant, "InstallTargetComplete");
         const auto install_complete = dynamic_cast<event::InstallTargetComplete*>(event.get());
         EXPECT_EQ(install_complete->serial.ToString(), "secondary_ecu_serial");
         EXPECT_TRUE(install_complete->success);
         break;
       }
-      case 8: {
+      case 9: {
         ASSERT_EQ(event->variant, "AllInstallsComplete");
         const auto installs_complete = dynamic_cast<event::AllInstallsComplete*>(event.get());
         EXPECT_EQ(installs_complete->result.ecu_reports.size(), 2);
@@ -329,14 +335,14 @@ TEST(Aktualizr, FullWithUpdates) {
                   data::ResultCode::Numeric::kOk);
         break;
       }
-      case 9: {
+      case 10: {
         ASSERT_EQ(event->variant, "PutManifestComplete");
         const auto put_complete = dynamic_cast<event::PutManifestComplete*>(event.get());
         EXPECT_TRUE(put_complete->success);
         ev_state.promise.set_value();
         break;
       }
-      case 12:
+      case 13:
         // Don't let the test run indefinitely!
         FAIL() << "Unexpected events!";
       default:
@@ -629,7 +635,7 @@ TEST(Aktualizr, FullWithUpdatesNeedReboot) {
     // check that a version is here, set to pending
 
     boost::optional<Uptane::Target> pending_target;
-    storage->loadPrimaryInstalledVersions(nullptr, &pending_target);
+    storage->loadPrimaryInstalledVersions(nullptr, &pending_target, nullptr);
     EXPECT_TRUE(!!pending_target);
   }
 
@@ -647,7 +653,7 @@ TEST(Aktualizr, FullWithUpdatesNeedReboot) {
 
     // check that everything is still pending
     boost::optional<Uptane::Target> pending_target;
-    storage->loadPrimaryInstalledVersions(nullptr, &pending_target);
+    storage->loadPrimaryInstalledVersions(nullptr, &pending_target, nullptr);
     EXPECT_TRUE(!!pending_target);
 
     result::UpdateCheck update_res = aktualizr.CheckUpdates().get();
@@ -673,14 +679,14 @@ TEST(Aktualizr, FullWithUpdatesNeedReboot) {
     // Primary is installed, nothing pending
     boost::optional<Uptane::Target> current_target;
     boost::optional<Uptane::Target> pending_target;
-    storage->loadPrimaryInstalledVersions(&current_target, &pending_target);
+    storage->loadPrimaryInstalledVersions(&current_target, &pending_target, nullptr);
     EXPECT_TRUE(!!current_target);
     EXPECT_FALSE(!!pending_target);
 
     // Secondary is installed, nothing pending
     boost::optional<Uptane::Target> sec_current_target;
     boost::optional<Uptane::Target> sec_pending_target;
-    storage->loadInstalledVersions("secondary_ecu_serial", &sec_current_target, &sec_pending_target);
+    storage->loadInstalledVersions("secondary_ecu_serial", &sec_current_target, &sec_pending_target, nullptr);
     EXPECT_TRUE(!!sec_current_target);
     EXPECT_FALSE(!!sec_pending_target);
   }
@@ -827,7 +833,7 @@ TEST(Aktualizr, FinalizationFailure) {
     // verify currently installed version
     boost::optional<Uptane::Target> current_version;
     boost::optional<Uptane::Target> pending_version;
-    ASSERT_TRUE(storage->loadInstalledVersions(primary_ecu_id, &current_version, &pending_version));
+    ASSERT_TRUE(storage->loadInstalledVersions(primary_ecu_id, &current_version, &pending_version, nullptr));
 
     // for some reason there is no any installed version at initial Aktualizr boot/run
     // IMHO it should return currently installed version
@@ -878,7 +884,7 @@ TEST(Aktualizr, FinalizationFailure) {
     pending_version = boost::none;
     current_version = boost::none;
 
-    ASSERT_TRUE(storage->loadInstalledVersions(primary_ecu_id, &current_version, &pending_version));
+    ASSERT_TRUE(storage->loadInstalledVersions(primary_ecu_id, &current_version, &pending_version, nullptr));
     EXPECT_FALSE(!!current_version);
     EXPECT_TRUE(!!pending_version);
     EXPECT_TRUE(pending_version->IsValid());
@@ -886,7 +892,7 @@ TEST(Aktualizr, FinalizationFailure) {
     pending_version = boost::none;
     current_version = boost::none;
 
-    ASSERT_TRUE(storage->loadInstalledVersions(secondary_ecu_id, &current_version, &pending_version));
+    ASSERT_TRUE(storage->loadInstalledVersions(secondary_ecu_id, &current_version, &pending_version, nullptr));
     EXPECT_TRUE(!!current_version);
     EXPECT_TRUE(current_version->IsValid());
     EXPECT_FALSE(!!pending_version);
@@ -926,14 +932,14 @@ TEST(Aktualizr, FinalizationFailure) {
     boost::optional<Uptane::Target> current_version;
     boost::optional<Uptane::Target> pending_version;
 
-    ASSERT_TRUE(storage->loadInstalledVersions(primary_ecu_id, &current_version, &pending_version));
+    ASSERT_TRUE(storage->loadInstalledVersions(primary_ecu_id, &current_version, &pending_version, nullptr));
     EXPECT_FALSE(!!current_version);
     EXPECT_FALSE(!!pending_version);
 
     current_version = boost::none;
     pending_version = boost::none;
 
-    ASSERT_TRUE(storage->loadInstalledVersions(secondary_ecu_id, &current_version, &pending_version));
+    ASSERT_TRUE(storage->loadInstalledVersions(secondary_ecu_id, &current_version, &pending_version, nullptr));
     EXPECT_TRUE(!!current_version);
     EXPECT_FALSE(!!pending_version);
   }
@@ -979,7 +985,7 @@ TEST(Aktualizr, InstallationFailure) {
     boost::optional<Uptane::Target> current_version;
     boost::optional<Uptane::Target> pending_version;
 
-    ASSERT_TRUE(storage->loadInstalledVersions(primary_ecu_id, &current_version, &pending_version));
+    ASSERT_TRUE(storage->loadInstalledVersions(primary_ecu_id, &current_version, &pending_version, nullptr));
 
     EXPECT_FALSE(!!pending_version);
     EXPECT_FALSE(!!current_version);
@@ -1005,7 +1011,7 @@ TEST(Aktualizr, InstallationFailure) {
     EXPECT_FALSE(storage->loadEcuInstallationResults(&ecu_installation_res));
     EXPECT_EQ(ecu_installation_res.size(), 0);
 
-    ASSERT_TRUE(storage->loadInstalledVersions(primary_ecu_id, &current_version, &pending_version));
+    ASSERT_TRUE(storage->loadInstalledVersions(primary_ecu_id, &current_version, &pending_version, nullptr));
     // it says that no any installed version found,
     // which is, on one hand is correct since installation of the found update failed hence nothing was installed,
     // on the other hand some version should have been installed prior to the failed update
@@ -1035,7 +1041,7 @@ TEST(Aktualizr, InstallationFailure) {
     boost::optional<Uptane::Target> current_version;
     boost::optional<Uptane::Target> pending_version;
 
-    ASSERT_TRUE(storage->loadInstalledVersions(primary_ecu_id, &current_version, &pending_version));
+    ASSERT_TRUE(storage->loadInstalledVersions(primary_ecu_id, &current_version, &pending_version, nullptr));
 
     EXPECT_FALSE(!!pending_version);
     EXPECT_FALSE(!!current_version);
@@ -1067,7 +1073,7 @@ TEST(Aktualizr, InstallationFailure) {
     EXPECT_FALSE(storage->loadEcuInstallationResults(&ecu_installation_res));
     EXPECT_EQ(ecu_installation_res.size(), 0);
 
-    ASSERT_TRUE(storage->loadInstalledVersions(primary_ecu_id, &current_version, &pending_version));
+    ASSERT_TRUE(storage->loadInstalledVersions(primary_ecu_id, &current_version, &pending_version, nullptr));
     // it says that no any installed version found,
     // which is, on one hand is correct since installation of the found update failed hence nothing was installed,
     // on the other hand some version should have been installed prior to the failed update
@@ -1141,7 +1147,7 @@ TEST(Aktualizr, AutoRebootAfterUpdate) {
   Config conf = UptaneTestCommon::makeTestConfig(temp_dir, http->tls_server);
   conf.pacman.fake_need_reboot = true;
   conf.uptane.force_install_completion = true;
-  conf.uptane.polling_sec = 0;
+  conf.uptane.polling_sec = 1;
 
   {
     // first run: do the install, exit UptaneCycle and emulate reboot since force_install_completion is set
@@ -1170,7 +1176,7 @@ TEST(Aktualizr, AutoRebootAfterUpdate) {
     // Primary is installed, nothing pending
     boost::optional<Uptane::Target> current_target;
     boost::optional<Uptane::Target> pending_target;
-    storage->loadPrimaryInstalledVersions(&current_target, &pending_target);
+    storage->loadPrimaryInstalledVersions(&current_target, &pending_target, nullptr);
     EXPECT_TRUE(!!current_target);
     EXPECT_FALSE(!!pending_target);
     EXPECT_EQ(http->manifest_sends, 3);

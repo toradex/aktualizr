@@ -95,8 +95,6 @@ class SotaUptaneClient {
 
 #ifdef BUILD_OFFLINE_UPDATES
   result::UpdateCheck fetchMetaOffUpd(const boost::filesystem::path &source_path);
-  result::Download fetchImagesOffUpd(const std::vector<Uptane::Target> &targets);
-  result::Install uptaneInstallOffUpd(const std::vector<Uptane::Target> &updates);
 #endif
 
  private:
@@ -169,7 +167,8 @@ class SotaUptaneClient {
                                                    const api::FlowControlToken *token = nullptr);
 #endif
 
-  data::InstallationResult PackageInstallSetResult(const Uptane::Target &target);
+  data::InstallationResult PackageInstallSetResult(const Uptane::Target &target,
+                                                   const Uptane::CorrelationId &correlation_id);
   void finalizeAfterReboot();
   // Part of sendDeviceData()
   void reportHwInfo();
