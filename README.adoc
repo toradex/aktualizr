@@ -78,6 +78,7 @@ Additional packages are used for non-essential components:
 * To run the linting tools, you will need `clang clang-format-11 clang-tidy-11`.
 * To build additional documentation, you will need `doxygen graphviz`.
 * To build with code coverage, you will need `lcov`.
+* To build the SOTA tools, you will need `python3-requests`.
 
 Some features also require additional packages:
 
