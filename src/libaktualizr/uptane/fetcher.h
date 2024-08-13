@@ -49,6 +49,13 @@ class IMetadataFetcher {
     fetchRole(result, maxsize, repo, role, Version(), flow_control);
   }
 
+  /**
+   * Does this fetcher have enough security to provide v1 root metadata?
+   * The online fetcher does (because of https), but the offline one does not
+   * (since anyone can create a suitable USB stick)
+   */
+  [[nodiscard]] virtual bool canTofu() const = 0;
+
  protected:
   IMetadataFetcher() = default;
   IMetadataFetcher(IMetadataFetcher&&) = default;
@@ -65,7 +72,14 @@ class Fetcher : public IMetadataFetcher {
   void fetchRole(std::string* result, int64_t maxsize, RepositoryType repo, const Uptane::Role& role, Version version,
                  const api::FlowControlToken* flow_control) const override;
 
-  std::string getRepoServer() const { return repo_server; }
+  [[nodiscard]] std::string getRepoServer() const { return repo_server; }
+
+  /**
+   * We are fetching over a pinned TLS connection, which is enough to
+   * bootstrap trust. If the user wants extra security, then they can provision
+   * devices with initial root metadata.
+   */
+  [[nodiscard]] bool canTofu() const override { return true; }
 
  private:
   std::shared_ptr<HttpInterface> http;
@@ -83,9 +97,17 @@ class OfflineUpdateFetcher : public IMetadataFetcher {
   void fetchRole(std::string* result, int64_t maxsize, RepositoryType repo, const Uptane::Role& role, Version version,
                  const api::FlowControlToken* flow_control) const override;
 
-  boost::filesystem::path getBasePath() const { return source_path_; }
-  boost::filesystem::path getImagesPath() const { return source_path_ / "images"; }
-  boost::filesystem::path getMetadataPath() const { return source_path_ / "metadata"; }
+  [[nodiscard]] boost::filesystem::path getBasePath() const { return source_path_; }
+  [[nodiscard]] boost::filesystem::path getImagesPath() const { return source_path_ / "images"; }
+  [[nodiscard]] boost::filesystem::path getMetadataPath() const { return source_path_ / "metadata"; }
+
+  /**
+   * Offline updates provide metadata as files on a USB stick. Anyone with
+   * physical access can create these, which means that we have to get the
+   * initial root metadata from somewhere else. Future metadata iterations are
+   * protected by the normal root rotation process, and so are safe.
+   */
+  [[nodiscard]] bool canTofu() const override { return false; }
 
  private:
   boost::filesystem::path source_path_;
