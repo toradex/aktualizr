@@ -56,12 +56,12 @@ class Provisioner {
    */
   bool Attempt();
 
-  State CurrentState() const { return current_state_; }
+  [[nodiscard]] State CurrentState() const { return current_state_; }
 
   /**
    * A textual description of the last cause for provisioning to fail.
    */
-  std::string LastError() const { return last_error_; };
+  [[nodiscard]] std::string LastError() const { return last_error_; };
 
   /**
    * Is is CurrentState() either kUnknown or kTemporaryError?
@@ -69,7 +69,7 @@ class Provisioner {
    * <code>while(provisioner.ShouldAttemptAgain()) { provisioner.MakeAttempt(); }</code>
    * @return
    */
-  bool ShouldAttemptAgain() const;
+  [[nodiscard]] bool ShouldAttemptAgain() const;
 
   /**
    * Get the ECU Serial for the Primary, lazily creating and storing it if necessary
@@ -126,14 +126,14 @@ class Provisioner {
   class EcuCompare {
    public:
     explicit EcuCompare(std::pair<Uptane::EcuSerial, Uptane::HardwareIdentifier> ecu_in)
-        : serial(std::move(ecu_in.first)), hardware_id(std::move(ecu_in.second)) {}
-    bool operator()(const std::pair<Uptane::EcuSerial, Uptane::HardwareIdentifier>& in) const {
-      return (in.first == serial && in.second == hardware_id);
+        : serial_(std::move(ecu_in.first)), hardware_id_(std::move(ecu_in.second)) {}
+    bool operator()(const std::pair<Uptane::EcuSerial, Uptane::HardwareIdentifier>& other) const {
+      return (other.first == serial_ && other.second == hardware_id_);
     }
 
    private:
-    const Uptane::EcuSerial serial;
-    const Uptane::HardwareIdentifier hardware_id;
+    const Uptane::EcuSerial serial_;
+    const Uptane::HardwareIdentifier hardware_id_;
   };
 
   /**

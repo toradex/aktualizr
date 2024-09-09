@@ -18,6 +18,7 @@ using Uptane::HardwareIdentifier;
 /*
  * Check that aktualizr creates provisioning data if they don't exist already.
  */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Provisioner, Success) {
   RecordProperty("zephyr_key", "OTA-983,TST-153");
   TemporaryDirectory temp_dir;
@@ -64,6 +65,7 @@ TEST(Provisioner, Success) {
  * Check that aktualizr does NOT change provisioning data if they DO exist
  * already.
  */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Provisioner, InitializeTwice) {
   RecordProperty("zephyr_key", "OTA-983,TST-154");
   TemporaryDirectory temp_dir;
@@ -122,6 +124,7 @@ TEST(Provisioner, InitializeTwice) {
  * Check that aktualizr does not generate a pet name when device ID is
  * specified.
  */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Provisioner, PetNameConfiguration) {
   RecordProperty("zephyr_key", "OTA-985,TST-146");
   TemporaryDirectory temp_dir;
@@ -159,6 +162,7 @@ TEST(Provisioner, PetNameConfiguration) {
  * already present in the device certificate's common name. This is the expected
  * behavior required to support replacing a Primary ECU.
  */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Provisioner, PetNameDeviceCert) {
   std::string test_name;
   Config conf("tests/config/basic.toml");
@@ -196,6 +200,7 @@ TEST(Provisioner, PetNameDeviceCert) {
 /**
  * Check that aktualizr generates a pet name if no device ID is specified.
  */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Provisioner, PetNameCreation) {
   RecordProperty("zephyr_key", "OTA-985,TST-145");
   TemporaryDirectory temp_dir;
@@ -207,19 +212,20 @@ TEST(Provisioner, PetNameCreation) {
   boost::filesystem::copy_file("tests/test_data/cred.zip", temp_dir.Path() / "cred.zip");
   conf.provision.provision_path = temp_dir.Path() / "cred.zip";
 
-  std::string test_name1, test_name2;
+  std::string device_id_1;
   {
     auto storage = INvStorage::newStorage(conf.storage);
     auto http = std::make_shared<HttpFake>(temp_dir.Path());
     auto keys = std::make_shared<KeyManager>(storage, conf.keymanagerConfig());
     ExpectProvisionOK(Provisioner(conf.provision, storage, http, keys, {}));
 
-    EXPECT_TRUE(storage->loadDeviceId(&test_name1));
-    EXPECT_NE(test_name1, "");
+    EXPECT_TRUE(storage->loadDeviceId(&device_id_1));
+    EXPECT_NE(device_id_1, "");
   }
 
   // Make sure a new name is generated if using a new database and the config
   // does not specify a device ID.
+  std::string device_id_2;
   TemporaryDirectory temp_dir2;
   {
     conf.storage.path = temp_dir2.Path();
@@ -231,8 +237,8 @@ TEST(Provisioner, PetNameCreation) {
     auto keys = std::make_shared<KeyManager>(storage, conf.keymanagerConfig());
     ExpectProvisionOK(Provisioner(conf.provision, storage, http, keys, {}));
 
-    EXPECT_TRUE(storage->loadDeviceId(&test_name2));
-    EXPECT_NE(test_name2, test_name1);
+    EXPECT_TRUE(storage->loadDeviceId(&device_id_2));
+    EXPECT_NE(device_id_2, device_id_1);
   }
 
   // If the device_id is cleared in the config, but still present in the
@@ -246,7 +252,7 @@ TEST(Provisioner, PetNameCreation) {
 
     std::string devid;
     EXPECT_TRUE(storage->loadDeviceId(&devid));
-    EXPECT_EQ(devid, test_name2);
+    EXPECT_EQ(devid, device_id_2);
   }
 
   // If the device_id is removed from storage, but the field is still present in
@@ -256,7 +262,7 @@ TEST(Provisioner, PetNameCreation) {
     TemporaryDirectory temp_dir3;
     conf.storage.path = temp_dir3.Path();
     boost::filesystem::copy_file("tests/test_data/cred.zip", temp_dir3.Path() / "cred.zip");
-    conf.provision.device_id = test_name2;
+    conf.provision.device_id = device_id_2;
 
     auto storage = INvStorage::newStorage(conf.storage);
     auto http = std::make_shared<HttpFake>(temp_dir3.Path());
@@ -265,7 +271,7 @@ TEST(Provisioner, PetNameCreation) {
 
     std::string devid;
     EXPECT_TRUE(storage->loadDeviceId(&devid));
-    EXPECT_EQ(devid, test_name2);
+    EXPECT_EQ(devid, device_id_2);
   }
 }
 
@@ -278,13 +284,13 @@ class HttpFakeDeviceRegistration : public HttpFake {
   HttpResponse post(const std::string& url, const Json::Value& data) override {
     if (url.find("/devices") != std::string::npos) {
       if (retcode == InitRetCode::kOk) {
-        return HttpResponse(Utils::readFile("tests/test_data/cred.p12"), 200, CURLE_OK, "");
+        return {Utils::readFile("tests/test_data/cred.p12"), 200, CURLE_OK, ""};
       } else if (retcode == InitRetCode::kOccupied) {
         Json::Value response;
         response["code"] = "device_already_registered";
-        return HttpResponse(Utils::jsonToStr(response), 400, CURLE_OK, "");
+        return {Utils::jsonToStr(response), 400, CURLE_OK, ""};
       } else {
-        return HttpResponse("", 400, CURLE_OK, "");
+        return {"", 400, CURLE_OK, ""};
       }
     }
     return HttpFake::post(url, data);
@@ -294,6 +300,7 @@ class HttpFakeDeviceRegistration : public HttpFake {
 };
 
 /* Detect and recover from failed device provisioning. */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Provisioner, DeviceRegistration) {
   TemporaryDirectory temp_dir;
   auto http = std::make_shared<HttpFakeDeviceRegistration>(temp_dir.Path());
@@ -333,13 +340,13 @@ class HttpFakeEcuRegistration : public HttpFake {
   HttpResponse post(const std::string& url, const Json::Value& data) override {
     if (url.find("/director/ecus") != std::string::npos) {
       if (retcode == InitRetCode::kOk) {
-        return HttpResponse("", 200, CURLE_OK, "");
+        return {"", 200, CURLE_OK, ""};
       } else if (retcode == InitRetCode::kOccupied) {
         Json::Value response;
         response["code"] = "ecu_already_registered";
-        return HttpResponse(Utils::jsonToStr(response), 400, CURLE_OK, "");
+        return {Utils::jsonToStr(response), 400, CURLE_OK, ""};
       } else {
-        return HttpResponse("", 400, CURLE_OK, "");
+        return {"", 400, CURLE_OK, ""};
       }
     }
     return HttpFake::post(url, data);
@@ -349,6 +356,7 @@ class HttpFakeEcuRegistration : public HttpFake {
 };
 
 /* Detect and recover from failed ECU registration. */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Provisioner, EcuRegisteration) {
   TemporaryDirectory temp_dir;
   auto http = std::make_shared<HttpFakeEcuRegistration>(temp_dir.Path());
@@ -383,6 +391,7 @@ TEST(Provisioner, EcuRegisteration) {
 }
 
 /* Use the system hostname as hardware ID if one is not provided. */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Provisioner, HostnameAsHardwareID) {
   TemporaryDirectory temp_dir;
   Config conf("tests/config/basic.toml");
@@ -409,6 +418,7 @@ TEST(Provisioner, HostnameAsHardwareID) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Provisioner, StableEcuSerial) {
   TemporaryDirectory temp_dir;
   auto http = std::make_shared<HttpFakeEcuRegistration>(temp_dir.Path());
