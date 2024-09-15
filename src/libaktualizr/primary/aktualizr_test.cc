@@ -2051,10 +2051,8 @@ class HttpFakeCampaign : public HttpFake {
       : HttpFake(test_dir_in, "", meta_dir_in) {}
 
   HttpResponse get(const std::string& url, int64_t maxsize, const api::FlowControlToken* flow_control) override {
-    EXPECT_NE(url.find("campaigner/"), std::string::npos);
-    boost::filesystem::path path = meta_dir / url.substr(tls_server.size() + strlen("campaigner/"));
-
     if (url.find("campaigner/campaigns") != std::string::npos) {
+      const auto path = meta_dir / url.substr(tls_server.size() + strlen("campaigner/"));
       return HttpResponse(Utils::readFile(path.parent_path() / "campaigner/campaigns.json"), 200, CURLE_OK, "");
     }
     return HttpFake::get(url, maxsize, flow_control);

@@ -12,6 +12,7 @@
 #include "primary/secondary_install_job.h"
 #include "provisioner.h"
 #include "uptane/exceptions.h"
+#include "uptane/tuf.h"
 #include "utilities/utils.h"
 
 // Fields to ignore from image-repo custom metadata when merging it with the one from the director.
@@ -75,8 +76,31 @@ bool SotaUptaneClient::attemptProvision() {
     return true;
   }
   if (!provisioner_.Attempt()) {
+    // Provisioning failed
     return false;
   }
+
+  // Fetch the image metadata under these conditions:
+  //  - Once per boot
+  //  - The device is provisioned
+  //  - We haven't ever fetched the root metadata
+  // This closes off a security gap: We bootstrap the Uptane root of trust
+  // (root.json x2) from the TLS keys we connect to the backend with, using
+  // Trust On First use (TOFU). The director metadata is fetched every time we
+  // check for updates, but the image metadata isn't fetched until the director
+  // pushes an update. This could be a long time after the device is fielded.
+  // Instead attempt to fetch it straight after provisioning.
+  std::string image_root_meta;
+  storage->loadLatestRoot(&image_root_meta, Uptane::RepositoryType::Image());
+  if (image_root_meta.empty()) {
+    LOG_INFO << "Fetching initial image root metadata";
+    try {
+      image_repo.updateMeta(*storage, *uptane_fetcher, flow_control_);
+    } catch (Uptane::Exception &) {
+      LOG_WARNING << "Fetching image metadata failed";
+    }
+  }
+
   // If we got here, provisioning occurred in this run, dump some debugging information
   LOG_INFO << "Primary ECU serial: " << provisioner_.PrimaryEcuSerial()
            << " with hardware ID: " << provisioner_.PrimaryHardwareIdentifier();

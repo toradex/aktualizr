@@ -5,6 +5,7 @@
 #include "httpfake.h"
 #include "libaktualizr/aktualizr.h"
 #include "test_utils.h"
+#include "uptane/tuf.h"
 #include "uptane_repo.h"
 #include "uptane_test_common.h"
 
@@ -42,6 +43,17 @@ class HttpFakeMetaCounter : public HttpFake {
     return HttpFake::get(url, maxsize, flow_control);
   }
 
+  void resetCounters() {
+    director_1root_count = 0;
+    director_2root_count = 0;
+    director_targets_count = 0;
+    image_1root_count = 0;
+    image_2root_count = 0;
+    image_timestamp_count = 0;
+    image_snapshot_count = 0;
+    image_targets_count = 0;
+  }
+
   int director_1root_count{0};
   int director_2root_count{0};
   int director_targets_count{0};
@@ -64,15 +76,33 @@ TEST(Aktualizr, MetadataFetch) {
   Config conf = UptaneTestCommon::makeTestConfig(temp_dir, http->tls_server);
   logger_set_threshold(boost::log::trivial::trace);
 
+  UptaneRepo uptane_repo_{meta_dir.PathString(), "", ""};
+  uptane_repo_.generateRepo(KeyType::kED25519);
+
   auto storage = INvStorage::newStorage(conf.storage);
   UptaneTestCommon::TestAktualizr aktualizr(conf, storage, http);
   aktualizr.Initialize();
 
-  // No updates scheduled: only download Director Root and Targets metadata.
-  UptaneRepo uptane_repo_{meta_dir.PathString(), "", ""};
-  uptane_repo_.generateRepo(KeyType::kED25519);
+  EXPECT_EQ(http->director_1root_count, 0);
+  EXPECT_EQ(http->director_2root_count, 0);
+  EXPECT_EQ(http->director_targets_count, 0);
+  EXPECT_EQ(http->image_1root_count, 1);
+  EXPECT_EQ(http->image_2root_count, 1);
+  EXPECT_EQ(http->image_timestamp_count, 1);
+  EXPECT_EQ(http->image_snapshot_count, 1);
+  EXPECT_EQ(http->image_targets_count, 1);
+  http->resetCounters();
 
+  // No updates scheduled: only download Director Root and Targets metadata.
   result::UpdateCheck update_result = aktualizr.CheckUpdates().get();
+
+  std::string image_root;
+  storage->loadLatestRoot(&image_root, Uptane::RepositoryType::Image());
+  EXPECT_FALSE(image_root.empty()) << "Should have loaded image root.json";
+  std::string director_root;
+  storage->loadLatestRoot(&director_root, Uptane::RepositoryType::Director());
+  EXPECT_FALSE(director_root.empty()) << "Should have loaded director root.json";
+
   EXPECT_EQ(update_result.status, result::UpdateStatus::kNoUpdatesAvailable);
   EXPECT_EQ(http->director_1root_count, 1);
   EXPECT_EQ(http->director_2root_count, 1);
@@ -97,7 +127,7 @@ TEST(Aktualizr, MetadataFetch) {
   EXPECT_EQ(http->director_1root_count, 1);
   EXPECT_EQ(http->director_2root_count, 2);
   EXPECT_EQ(http->director_targets_count, 2);
-  EXPECT_EQ(http->image_1root_count, 1);
+  EXPECT_EQ(http->image_1root_count, 0);
   EXPECT_EQ(http->image_2root_count, 1);
   EXPECT_EQ(http->image_timestamp_count, 1);
   EXPECT_EQ(http->image_snapshot_count, 1);
@@ -114,7 +144,7 @@ TEST(Aktualizr, MetadataFetch) {
   EXPECT_EQ(http->director_1root_count, 1);
   EXPECT_EQ(http->director_2root_count, 3);
   EXPECT_EQ(http->director_targets_count, 3);
-  EXPECT_EQ(http->image_1root_count, 1);
+  EXPECT_EQ(http->image_1root_count, 0);
   EXPECT_EQ(http->image_2root_count, 2);
   EXPECT_EQ(http->image_timestamp_count, 2);
   EXPECT_EQ(http->image_snapshot_count, 1);
@@ -133,7 +163,7 @@ TEST(Aktualizr, MetadataFetch) {
   EXPECT_EQ(http->director_1root_count, 1);
   EXPECT_EQ(http->director_2root_count, 4);
   EXPECT_EQ(http->director_targets_count, 4);
-  EXPECT_EQ(http->image_1root_count, 1);
+  EXPECT_EQ(http->image_1root_count, 0);
   EXPECT_EQ(http->image_2root_count, 3);
   EXPECT_EQ(http->image_timestamp_count, 3);
   EXPECT_EQ(http->image_snapshot_count, 2);
