@@ -56,6 +56,15 @@ void RepositoryCommon::updateRoot(INvStorage& storage, const IMetadataFetcher& f
     if (storage.loadLatestRoot(&root_raw, repo_type)) {
       initRoot(repo_type, root_raw);
     } else {
+      // Refuse to fetch v1 root metadata from a lockbox. For online updates, we
+      // have a Trust On First Use policy for root metadata. This is reasonable
+      // because the metadata is being fetched over https anyway, so the TLS cert
+      // provides ample security in the narrow window of the first update if people
+      // don't want to provision devices with root.1.json in the factory. This
+      // doesn't apply for the offine case, so refuse to load it.
+      if (!fetcher.canTofu()) {
+        throw Uptane::Exception(repo_type.ToString(), "Offline updates require initial root metadata");
+      }
       fetcher.fetchRole(&root_raw, kMaxRootSize, repo_type, Role::Root(), Version(1));
       initRoot(repo_type, root_raw);
       storage.storeRoot(root_raw, repo_type, Version(1));

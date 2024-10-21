@@ -12,6 +12,7 @@
 #include "primary/secondary_install_job.h"
 #include "provisioner.h"
 #include "uptane/exceptions.h"
+#include "uptane/tuf.h"
 #include "utilities/utils.h"
 
 // Fields to ignore from image-repo custom metadata when merging it with the one from the director.
@@ -75,8 +76,31 @@ bool SotaUptaneClient::attemptProvision() {
     return true;
   }
   if (!provisioner_.Attempt()) {
+    // Provisioning failed
     return false;
   }
+
+  // Fetch the image metadata under these conditions:
+  //  - Once per boot
+  //  - The device is provisioned
+  //  - We haven't ever fetched the root metadata
+  // This closes off a security gap: We bootstrap the Uptane root of trust
+  // (root.json x2) from the TLS keys we connect to the backend with, using
+  // Trust On First use (TOFU). The director metadata is fetched every time we
+  // check for updates, but the image metadata isn't fetched until the director
+  // pushes an update. This could be a long time after the device is fielded.
+  // Instead attempt to fetch it straight after provisioning.
+  std::string image_root_meta;
+  storage->loadLatestRoot(&image_root_meta, Uptane::RepositoryType::Image());
+  if (image_root_meta.empty()) {
+    LOG_INFO << "Fetching initial image root metadata";
+    try {
+      image_repo.updateMeta(*storage, *uptane_fetcher, flow_control_);
+    } catch (Uptane::Exception &) {
+      LOG_WARNING << "Fetching image metadata failed";
+    }
+  }
+
   // If we got here, provisioning occurred in this run, dump some debugging information
   LOG_INFO << "Primary ECU serial: " << provisioner_.PrimaryEcuSerial()
            << " with hardware ID: " << provisioner_.PrimaryHardwareIdentifier();
@@ -1455,19 +1479,20 @@ data::InstallationResult SotaUptaneClient::rotateSecondaryRoot(Uptane::Repositor
 
   // Only send intermediate Roots that would otherwise be skipped. The latest
   // will be sent with the complete set of the latest metadata.
-  for (int version_to_send = sec_root_version + 1; version_to_send < last_root_version; version_to_send++) {
+  for (int v = sec_root_version + 1; v < last_root_version; v++) {
+    Uptane::Version version_to_send{v};
     std::string root;
-    if (!storage->loadRoot(&root, repo, Uptane::Version(version_to_send))) {
-      LOG_WARNING << "Couldn't find Root metadata in the storage, trying remote repo";
+    if (!storage->loadRoot(&root, repo, version_to_send)) {
+      LOG_WARNING << "Couldn't find Root metadata " << version_to_send << " in the storage, trying remote repo";
       try {
         if (utype == UpdateType::kOffline) {
           // TODO: [OFFUPD] Test this condition; How?
           // TODO: [OFFUPD] Protect with an #ifdef ??
-          uptane_fetcher_offupd->fetchRole(&root, Uptane::kMaxRootSize, repo, Uptane::Role::Root(),
-                                           Uptane::Version(version_to_send), flow_control_);
+          uptane_fetcher_offupd->fetchRole(&root, Uptane::kMaxRootSize, repo, Uptane::Role::Root(), version_to_send,
+                                           flow_control_);
         } else {
-          uptane_fetcher->fetchRole(&root, Uptane::kMaxRootSize, repo, Uptane::Role::Root(),
-                                    Uptane::Version(version_to_send), flow_control_);
+          uptane_fetcher->fetchRole(&root, Uptane::kMaxRootSize, repo, Uptane::Role::Root(), version_to_send,
+                                    flow_control_);
         }
       } catch (const std::exception &e) {
         LOG_ERROR << "Root metadata could not be fetched for Secondary with serial " << secondary.getSerial()
@@ -1490,7 +1515,7 @@ data::InstallationResult SotaUptaneClient::rotateSecondaryRoot(Uptane::Repositor
         // defending against: the secondary can't rotate root, and treat this
         // as a success. The previous code would have returned success in this
         // case anyway.
-        if (version_to_send == 1) {
+        if (version_to_send == Uptane::Version(1)) {
           LOG_WARNING
               << "Sending root.1.json to a secondary failed. Assuming it doesn't allow root rotation and continuing.";
           return {data::ResultCode::Numeric::kOk, ""};

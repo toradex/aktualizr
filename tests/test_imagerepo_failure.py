@@ -78,11 +78,11 @@ def test_imagerepo_update_after_image_download_failure(install_mngr, director,
 @with_uptane_backend(start_generic_server=True)
 @with_path(paths=['/1.root.json', '/timestamp.json', '/snapshot.json', '/targets.json'])
 @with_imagerepo(handlers=[
-                            DownloadInterruptionHandler(number_of_failures=3),
-                            MalformedJsonHandler(number_of_failures=1),
+                            DownloadInterruptionHandler(number_of_failures=6),
+                            MalformedJsonHandler(number_of_failures=2),
                         ])
 @with_director()
-@with_aktualizr(run_mode='once')
+@with_aktualizr(run_mode='once', output_logs=True)
 @with_install_manager()
 def test_imagerepo_unsuccessful_download(install_mngr, aktualizr,
                                          director, **kwargs):
