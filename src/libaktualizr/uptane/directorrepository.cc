@@ -239,7 +239,7 @@ void DirectorRepository::updateMetaOffUpd(INvStorage& storage, const OfflineUpda
   // Update Director Offline Snapshot Metadata
   // PURE-2 step 3(i)
   std::string director_offline_snapshot;
-  fetcher.fetchLatestRole(&director_offline_snapshot, kMaxSnapshotSize, RepositoryType::Director(),
+  fetcher.fetchLatestRole(&director_offline_snapshot, kMaxOfflineSnapshotSize, RepositoryType::Director(),
                           Role::OfflineSnapshot());
   const int fetched_version = extractVersionUntrusted(director_offline_snapshot);
 
