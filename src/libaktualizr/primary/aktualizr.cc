@@ -11,11 +11,7 @@
 #include "utilities/apiqueue.h"
 #include "utilities/timer.h"
 
-using std::make_shared;
-using std::move;
-using std::shared_ptr;
-
-namespace bf = boost::filesystem;
+namespace fs = boost::filesystem;
 
 Aktualizr::Aktualizr(const Config &config)
     : Aktualizr(config, INvStorage::newStorage(config.storage), std::make_shared<HttpClient>()) {}
@@ -489,7 +485,7 @@ result::Pause Aktualizr::Resume() {
 void Aktualizr::Abort() { api_queue_->abort(); }
 
 boost::signals2::connection Aktualizr::SetSignalHandler(
-    const std::function<void(shared_ptr<event::BaseEvent>)> &handler) {
+    const std::function<void(std::shared_ptr<event::BaseEvent>)> &handler) {
   return sig_->connect(handler);
 }
 
@@ -531,8 +527,8 @@ bool Aktualizr::OfflineUpdateAvailable() {
   OffUpdSourceState cur_state = OffUpdSourceState::Unknown;
 
   boost::system::error_code ec;
-  if (bf::exists(config_.uptane.offline_updates_source, ec)) {
-    if (bf::is_directory(config_.uptane.offline_updates_source / update_subdir, ec)) {
+  if (fs::exists(config_.uptane.offline_updates_source, ec)) {
+    if (fs::is_directory(config_.uptane.offline_updates_source / update_subdir, ec)) {
       cur_state = OffUpdSourceState::SourceExists;
     } else {
       cur_state = OffUpdSourceState::SourceExistsNoContent;
@@ -547,7 +543,7 @@ bool Aktualizr::OfflineUpdateAvailable() {
   return (old_state == OffUpdSourceState::SourceDoesNotExist && cur_state == OffUpdSourceState::SourceExists);
 }
 
-std::future<result::UpdateCheck> Aktualizr::CheckUpdatesOffline(const boost::filesystem::path &source_path) {
+std::future<result::UpdateCheck> Aktualizr::CheckUpdatesOffline(const fs::path &source_path) {
   std::function<result::UpdateCheck()> task(
       [this, source_path] { return uptane_client_->fetchMetaOffUpd(source_path); });
   return api_queue_->enqueue(std::move(task));
