@@ -14,6 +14,7 @@ constexpr int64_t kMaxRootSize = 64 * 1024;
 constexpr int64_t kMaxDirectorTargetsSize = 64 * 1024;
 constexpr int64_t kMaxTimestampSize = 64 * 1024;
 constexpr int64_t kMaxSnapshotSize = 64 * 1024;
+constexpr int64_t kMaxOfflineSnapshotSize = 1 * 1024 * 1024;
 constexpr int64_t kMaxImageTargetsSize = 8 * 1024 * 1024;
 
 class IMetadataFetcher {
