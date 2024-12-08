@@ -21,9 +21,9 @@ void DirectorRepository::resetMeta() {
 void DirectorRepository::checkTargetsExpired(UpdateType utype) {
   if (targets.isExpired(Now())) {
     if (utype == UpdateType::kOffline) {
-      throw Uptane::ExpiredMetadata(type.ToString(), Role::OFFLINEUPDATES);
+      throw Uptane::ExpiredMetadata(type, Role::OFFLINEUPDATES);
     } else {
-      throw Uptane::ExpiredMetadata(type.ToString(), Role::TARGETS);
+      throw Uptane::ExpiredMetadata(type, Role::TARGETS);
     }
   }
 }
@@ -33,9 +33,9 @@ void DirectorRepository::targetsSanityCheck(UpdateType utype) {
   //  verify that there are no delegations.
   if (!targets.delegated_role_names_.empty()) {
     if (utype == UpdateType::kOffline) {
-      throw Uptane::InvalidMetadata(type.ToString(), Role::OFFLINEUPDATES, "Found unexpected delegation.");
+      throw Uptane::InvalidMetadata(type, Role::OFFLINEUPDATES, "Found unexpected delegation.");
     } else {
-      throw Uptane::InvalidMetadata(type.ToString(), Role::TARGETS, "Found unexpected delegation.");
+      throw Uptane::InvalidMetadata(type, Role::TARGETS, "Found unexpected delegation.");
     }
   }
   //  5.4.4.6.7. If checking Targets metadata from the Director repository,
@@ -48,10 +48,10 @@ void DirectorRepository::targetsSanityCheck(UpdateType utype) {
       } else {
         if (utype == UpdateType::kOffline) {
           LOG_ERROR << "ECU " << ecu.first << " appears twice in Director's Offline Targets";
-          throw Uptane::InvalidMetadata(type.ToString(), Role::OFFLINEUPDATES, "Found repeated ECU ID.");
+          throw Uptane::InvalidMetadata(type, Role::OFFLINEUPDATES, "Found repeated ECU ID.");
         } else {
           LOG_ERROR << "ECU " << ecu.first << " appears twice in Director's Targets";
-          throw Uptane::InvalidMetadata(type.ToString(), Role::TARGETS, "Found repeated ECU ID.");
+          throw Uptane::InvalidMetadata(type, Role::TARGETS, "Found repeated ECU ID.");
         }
       }
     }
@@ -76,13 +76,13 @@ void DirectorRepository::checkMetaOffline(INvStorage& storage) {
   {
     std::string director_root;
     if (!storage.loadLatestRoot(&director_root, RepositoryType::Director())) {
-      throw Uptane::SecurityException(RepositoryType::DIRECTOR, "Could not load latest root");
+      throw Uptane::SecurityException(RepositoryType::Director(), "Could not load latest root");
     }
 
-    initRoot(RepositoryType(RepositoryType::DIRECTOR), director_root);
+    initRoot(RepositoryType(RepositoryType::Director()), director_root);
 
     if (rootExpired()) {
-      throw Uptane::ExpiredMetadata(RepositoryType::DIRECTOR, Role::ROOT);
+      throw Uptane::ExpiredMetadata(RepositoryType::Director(), Role::ROOT);
     }
   }
 
@@ -91,7 +91,7 @@ void DirectorRepository::checkMetaOffline(INvStorage& storage) {
     std::string director_targets;
 
     if (!storage.loadNonRoot(&director_targets, RepositoryType::Director(), Role::Targets())) {
-      throw Uptane::SecurityException(RepositoryType::DIRECTOR, "Could not load Targets role");
+      throw Uptane::SecurityException(RepositoryType::Director(), "Could not load Targets role");
     }
 
     verifyTargets(director_targets);
@@ -143,7 +143,7 @@ void DirectorRepository::updateMeta(INvStorage& storage, const IMetadataFetcher&
     // that case, the member variable targets is updated, but it isn't stored in
     // the database, which can cause some minor confusion.
     if (local_version > remote_version) {
-      throw Uptane::SecurityException(RepositoryType::DIRECTOR, "Rollback attempt");
+      throw Uptane::SecurityException(RepositoryType::Director(), "Rollback attempt");
     } else if (local_version < remote_version && !targets.targets.empty()) {
       storage.storeNonRoot(director_targets, RepositoryType::Director(), Role::Targets());
     }
@@ -197,19 +197,19 @@ void DirectorRepository::checkMetaOfflineOffUpd(INvStorage& storage) {
   // Load Director Root Metadata
   std::string director_root;
   if (!storage.loadLatestRoot(&director_root, RepositoryType::Director())) {
-    throw Uptane::SecurityException(RepositoryType::DIRECTOR, "Could not load latest root");
+    throw Uptane::SecurityException(RepositoryType::Director(), "Could not load latest root");
   }
 
-  initRoot(RepositoryType(RepositoryType::DIRECTOR), director_root);
+  initRoot(RepositoryType(RepositoryType::Director()), director_root);
 
   if (rootExpired()) {
-    throw Uptane::ExpiredMetadata(RepositoryType::DIRECTOR, Role::ROOT);
+    throw Uptane::ExpiredMetadata(RepositoryType::Director(), Role::ROOT);
   }
 
   // Load Director Offline-Snapshot Metadata
   std::string director_offline_snapshot;
   if (!storage.loadNonRoot(&director_offline_snapshot, RepositoryType::Director(), Role::OfflineSnapshot())) {
-    throw Uptane::SecurityException(RepositoryType::DIRECTOR, "Could not load Offline Snapshot role");
+    throw Uptane::SecurityException(RepositoryType::Director(), "Could not load Offline Snapshot role");
   }
 
   verifyOfflineSnapshot(director_offline_snapshot);
@@ -219,7 +219,7 @@ void DirectorRepository::checkMetaOfflineOffUpd(INvStorage& storage) {
   // Load Director Offline-Updates(Targets) Metadata
   std::string director_offline_targets;
   if (!storage.loadNonRoot(&director_offline_targets, RepositoryType::Director(), Role::OfflineUpdates())) {
-    throw Uptane::SecurityException(RepositoryType::DIRECTOR, "Could not load Offline Updates role");
+    throw Uptane::SecurityException(RepositoryType::Director(), "Could not load Offline Updates role");
   }
 
   verifyOfflineTargets(director_offline_targets, storage);
@@ -287,7 +287,8 @@ void DirectorRepository::updateMetaOffUpd(INvStorage& storage, const OfflineUpda
   }
 
   if (offline_target_name.empty()) {
-    throw Uptane::SecurityException(RepositoryType::DIRECTOR, "Could not find any valid offline updates metadata file");
+    throw Uptane::SecurityException(RepositoryType::Director(),
+                                    "Could not find any valid offline updates metadata file");
   }
 
   // PURE-2 step 4(i)
@@ -301,7 +302,7 @@ void DirectorRepository::updateMetaOffUpd(INvStorage& storage, const OfflineUpda
 
   Version offline_targets_version = Version(Utils::parseJSON(director_offline_targets)["signed"]["version"].asInt());
   if (offline_targets_version != offline_snapshot_version) {
-    throw Uptane::VersionMismatch(RepositoryType::DIRECTOR, Uptane::Role::OFFLINEUPDATES);
+    throw Uptane::VersionMismatch(RepositoryType::Director(), Uptane::Role::OFFLINEUPDATES);
   }
 
   verifyOfflineTargets(director_offline_targets, storage);
@@ -333,7 +334,7 @@ void DirectorRepository::verifyOfflineSnapshot(const std::string& snapshot_raw_n
       for (auto old = target_list_old.begin(); old != target_list_old.end(); ++old) {
         if (next.key().asString() == old.key().asString()) {
           if ((*old)["version"].asInt() > (*next)["version"].asInt()) {
-            throw Uptane::SecurityException(RepositoryType::DIRECTOR, "Rollback attempt");
+            throw Uptane::SecurityException(RepositoryType::Director(), "Rollback attempt");
           }
           break;
         }
@@ -344,7 +345,7 @@ void DirectorRepository::verifyOfflineSnapshot(const std::string& snapshot_raw_n
 
 void DirectorRepository::checkOfflineSnapshotExpired() {
   if (offline_snapshot_.isExpired(Now())) {
-    throw Uptane::ExpiredMetadata(type.ToString(), Role::OFFLINESNAPSHOT);
+    throw Uptane::ExpiredMetadata(type, Role::OFFLINESNAPSHOT);
   }
 }
 

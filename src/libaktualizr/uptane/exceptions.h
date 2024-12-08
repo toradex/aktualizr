@@ -4,6 +4,8 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include "libaktualizr/types.h"
+#include "uptane/tuf.h"
 
 namespace Uptane {
 
@@ -20,36 +22,42 @@ enum class Persistence { kPermanent = 0, kTemporary };
 
 class Exception : public std::logic_error {
  public:
-  Exception(std::string reponame, const std::string& what_arg, Persistence persistence = Persistence::kPermanent)
-      : std::logic_error(what_arg.c_str()), reponame_(std::move(reponame)), persistence_(persistence) {}
-  virtual std::string getName() const { return reponame_; };
-  Persistence getPersistence() const { return persistence_; };
+  Exception(RepositoryType repo_type, const std::string& what_arg, Persistence persistence = Persistence::kPermanent)
+      : std::logic_error(what_arg.c_str()), subject_{repo_type.ToString()}, persistence_(persistence) {}
+  // NOLINTNEXTLINE(modernize-pass-by-value) Would require changing caller's types too
+  Exception(const std::string& subject, const std::string& what_arg, Persistence persistence = Persistence::kPermanent)
+      : std::logic_error(what_arg.c_str()), subject_{subject}, persistence_(persistence) {}
+  [[nodiscard]] virtual std::string getName() const { return subject_; };
+  [[nodiscard]] Persistence getPersistence() const { return persistence_; };
 
  protected:
-  std::string reponame_;
+  std::string subject_;
   Persistence persistence_;
 };
 
 class MetadataFetchFailure : public Exception {
  public:
-  MetadataFetchFailure(const std::string& reponame, const std::string& role,
+  MetadataFetchFailure(RepositoryType repo_type, const std::string& role,
                        const Persistence persistence = Persistence::kTemporary)
-      : Exception(reponame, std::string("Failed to fetch role ") + role + " in " + reponame + " repository.",
+      : Exception(repo_type,
+                  std::string("Failed to fetch role ") + role + " in " + repo_type.ToString() + " repository.",
                   persistence) {}
 };
 
 class SecurityException : public Exception {
  public:
-  SecurityException(const std::string& reponame, const std::string& what_arg,
+  SecurityException(RepositoryType repo_type, const std::string& what_arg,
                     const Persistence persistence = Persistence::kPermanent)
-      : Exception(reponame, what_arg, persistence) {}
+      : Exception(repo_type, what_arg, persistence) {}
 };
 
 class TargetContentMismatch : public Exception {
  public:
   explicit TargetContentMismatch(const std::string& targetname, const Persistence persistence = Persistence::kPermanent)
-      : Exception(targetname, "Director Target filename matches currently installed version, but content differs.",
-                  persistence) {}
+      : Exception(
+            RepositoryType::Director(),
+            "Director Target filename " + targetname + " matches currently installed version, but content differs.",
+            persistence) {}
 };
 
 class TargetHashMismatch : public Exception {
@@ -66,36 +74,32 @@ class OversizedTarget : public Exception {
 
 class IllegalThreshold : public Exception {
  public:
-  IllegalThreshold(const std::string& reponame, const std::string& what_arg,
+  IllegalThreshold(RepositoryType repo_type, const std::string& what_arg,
                    const Persistence persistence = Persistence::kPermanent)
-      : Exception(reponame, what_arg, persistence) {}
-};
-
-class MissingRepo : public Exception {
- public:
-  explicit MissingRepo(const std::string& reponame, const Persistence persistence = Persistence::kPermanent)
-      : Exception(reponame, "The " + reponame + " repo is missing.", persistence) {}
+      : Exception(repo_type, what_arg, persistence) {}
 };
 
 class UnmetThreshold : public Exception {
  public:
-  UnmetThreshold(const std::string& reponame, const std::string& role,
+  UnmetThreshold(RepositoryType repo_type, const std::string& role,
                  const Persistence persistence = Persistence::kPermanent)
-      : Exception(reponame, "The " + role + " metadata had an unmet threshold.", persistence) {}
+      : Exception(repo_type, "The " + role + " metadata had an unmet threshold.", persistence) {}
 };
 
 class ExpiredMetadata : public Exception {
  public:
-  ExpiredMetadata(const std::string& reponame, const std::string& role,
+  ExpiredMetadata(RepositoryType repo_type, const std::string& role,
                   const Persistence persistence = Persistence::kPermanent)
-      : Exception(reponame, "The " + role + " metadata was expired.", persistence) {}
+      : Exception(repo_type, "The " + role + " metadata was expired.", persistence) {}
 };
 
 class InvalidMetadata : public Exception {
  public:
-  InvalidMetadata(const std::string& reponame, const std::string& role, const std::string& reason,
+  InvalidMetadata(RepositoryType repo_type, const std::string& role, const std::string& reason,
                   const Persistence persistence = Persistence::kPermanent)
-      : Exception(reponame, "The " + role + " metadata failed to parse: " + reason, persistence) {}
+      : Exception(repo_type, "The " + role + " metadata failed to parse: " + reason, persistence) {}
+  explicit InvalidMetadata(const std::string& reason, const Persistence persistence = Persistence::kPermanent)
+      : Exception("", "The metadata failed to parse: " + reason, persistence) {}
 };
 
 class TargetMismatch : public Exception {
@@ -106,15 +110,15 @@ class TargetMismatch : public Exception {
 
 class NonUniqueSignatures : public Exception {
  public:
-  NonUniqueSignatures(const std::string& reponame, const std::string& role,
+  NonUniqueSignatures(RepositoryType repo_type, const std::string& role,
                       const Persistence persistence = Persistence::kPermanent)
-      : Exception(reponame, "The role " + role + " had non-unique signatures.", persistence) {}
+      : Exception(repo_type, "The role " + role + " had non-unique signatures.", persistence) {}
 };
 
 class BadKeyId : public Exception {
  public:
-  explicit BadKeyId(const std::string& reponame, const Persistence persistence = Persistence::kPermanent)
-      : Exception(reponame, "A key has an incorrect associated key ID", persistence) {}
+  explicit BadKeyId(RepositoryType repo_type, const Persistence persistence = Persistence::kPermanent)
+      : Exception(repo_type, "A key has an incorrect associated key ID", persistence) {}
 };
 
 class BadEcuId : public Exception {
@@ -133,15 +137,15 @@ class BadHardwareId : public Exception {
 
 class RootRotationError : public Exception {
  public:
-  explicit RootRotationError(const std::string& reponame, const Persistence persistence = Persistence::kPermanent)
-      : Exception(reponame, "Version in Root metadata does not match its expected value.", persistence) {}
+  explicit RootRotationError(RepositoryType repo_type, const Persistence persistence = Persistence::kPermanent)
+      : Exception(repo_type, "Version in Root metadata does not match its expected value.", persistence) {}
 };
 
 class VersionMismatch : public Exception {
  public:
-  VersionMismatch(const std::string& reponame, const std::string& role,
+  VersionMismatch(RepositoryType repo_type, const std::string& role,
                   const Persistence persistence = Persistence::kPermanent)
-      : Exception(reponame, "The version of role " + role + " does not match the entry in Snapshot metadata.",
+      : Exception(repo_type, "The version of role " + role + " does not match the entry in Snapshot metadata.",
                   persistence) {}
 };
 
@@ -171,8 +175,8 @@ class InvalidTarget : public Exception {
 
 class LocallyAborted : public Exception {
  public:
-  explicit LocallyAborted(const std::string& reponame, const Persistence persistence = Persistence::kPermanent)
-      : Exception(reponame, "Update was aborted on the client", persistence) {}
+  explicit LocallyAborted(RepositoryType repo_type, const Persistence persistence = Persistence::kPermanent)
+      : Exception(repo_type, "Update was aborted on the client", persistence) {}
 };
 
 }  // namespace Uptane

@@ -19,7 +19,7 @@ void Fetcher::fetchRole(std::string* result, int64_t maxsize, RepositoryType rep
     throw Uptane::LocallyAborted(repo);
   }
   if (!response.isOk()) {
-    throw Uptane::MetadataFetchFailure(repo.ToString(), role.ToString());
+    throw Uptane::MetadataFetchFailure(repo, role.ToString());
   }
 
   *result = response.body;
@@ -38,7 +38,7 @@ void OfflineUpdateFetcher::fetchRole(std::string* result, int64_t maxsize, Repos
 
   boost::system::error_code ec;
   if (!boost::filesystem::exists(path, ec)) {
-    throw Uptane::MetadataFetchFailure(repo.ToString(), path.string());
+    throw Uptane::MetadataFetchFailure(repo, path.string());
   }
 
   std::ifstream file_input(path.c_str());
@@ -49,7 +49,7 @@ void OfflineUpdateFetcher::fetchRole(std::string* result, int64_t maxsize, Repos
   // - Handle the case where tellg() returns -1;
   // - Handle the case where an error happens during read() (if (!file_input)).
   if (file_size > maxsize) {
-    throw Uptane::MetadataFetchFailure(repo.ToString(), path.string());
+    throw Uptane::MetadataFetchFailure(repo, path.string());
   }
 
   file_input.seekg(0, std::ifstream::beg);
