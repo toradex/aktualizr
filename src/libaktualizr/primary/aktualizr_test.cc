@@ -4,6 +4,7 @@
 #include <future>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <boost/filesystem.hpp>
@@ -79,7 +80,7 @@ TEST(Aktualizr, FullNoUpdates) {
         break;
       case 1: {
         ASSERT_EQ(event->variant, "UpdateCheckComplete");
-        const auto targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
+        auto* const targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
         EXPECT_EQ(targets_event->result.ecus_count, 0);
         EXPECT_EQ(targets_event->result.updates.size(), 0);
         EXPECT_EQ(targets_event->result.status, result::UpdateStatus::kNoUpdatesAvailable);
@@ -87,7 +88,7 @@ TEST(Aktualizr, FullNoUpdates) {
       }
       case 2: {
         ASSERT_EQ(event->variant, "UpdateCheckComplete");
-        const auto targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
+        auto* const targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
         EXPECT_EQ(targets_event->result.ecus_count, 0);
         EXPECT_EQ(targets_event->result.updates.size(), 0);
         EXPECT_EQ(targets_event->result.status, result::UpdateStatus::kNoUpdatesAvailable);
@@ -263,14 +264,14 @@ TEST(Aktualizr, FullWithUpdates) {
     if (event->isTypeOf<event::DownloadProgressReport>()) {
       return;
     }
-    LOG_INFO << "Got " << event->variant;
+    LOG_INFO << "Got event#" << ev_state.num_events << " " << event->variant;
     switch (ev_state.num_events) {
       case 0:
         EXPECT_EQ(event->variant, "SendDeviceDataComplete");
         break;
       case 1: {
         ASSERT_EQ(event->variant, "UpdateCheckComplete");
-        const auto targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
+        auto* const targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
         EXPECT_EQ(targets_event->result.ecus_count, 2);
         EXPECT_EQ(targets_event->result.updates.size(), 2u);
         EXPECT_EQ(targets_event->result.updates[0].filename(), "primary_firmware.txt");
@@ -281,7 +282,7 @@ TEST(Aktualizr, FullWithUpdates) {
       case 2:
       case 3: {
         ASSERT_EQ(event->variant, "DownloadTargetComplete");
-        const auto download_event = dynamic_cast<event::DownloadTargetComplete*>(event.get());
+        auto* const download_event = dynamic_cast<event::DownloadTargetComplete*>(event.get());
         EXPECT_TRUE(download_event->update.filename() == "primary_firmware.txt" ||
                     download_event->update.filename() == "secondary_firmware.txt");
         EXPECT_TRUE(download_event->success);
@@ -289,7 +290,7 @@ TEST(Aktualizr, FullWithUpdates) {
       }
       case 4: {
         ASSERT_EQ(event->variant, "AllDownloadsComplete");
-        const auto downloads_complete = dynamic_cast<event::AllDownloadsComplete*>(event.get());
+        auto* const downloads_complete = dynamic_cast<event::AllDownloadsComplete*>(event.get());
         EXPECT_EQ(downloads_complete->result.updates.size(), 2);
         EXPECT_TRUE(downloads_complete->result.updates[0].filename() == "primary_firmware.txt" ||
                     downloads_complete->result.updates[1].filename() == "primary_firmware.txt");
@@ -302,14 +303,14 @@ TEST(Aktualizr, FullWithUpdates) {
         // Downloads to secondaries run first (Not a requirement, just how it
         // works at present)
         ASSERT_EQ(event->variant, "InstallStarted");
-        const auto install_started = dynamic_cast<event::InstallStarted*>(event.get());
+        auto* const install_started = dynamic_cast<event::InstallStarted*>(event.get());
         EXPECT_EQ(install_started->serial.ToString(), "secondary_ecu_serial");
         break;
       }
       case 6: {
         // Primary always gets installed
         ASSERT_EQ(event->variant, "InstallStarted");
-        const auto install_started = dynamic_cast<event::InstallStarted*>(event.get());
+        auto* const install_started = dynamic_cast<event::InstallStarted*>(event.get());
         EXPECT_EQ(install_started->serial.ToString(), "CA:FE:A6:D2:84:9D");
         break;
       }
@@ -317,21 +318,21 @@ TEST(Aktualizr, FullWithUpdates) {
         // Primary should complete before Secondary begins. (Again not a
         // requirement per se.)
         ASSERT_EQ(event->variant, "InstallTargetComplete");
-        const auto install_complete = dynamic_cast<event::InstallTargetComplete*>(event.get());
+        auto* const install_complete = dynamic_cast<event::InstallTargetComplete*>(event.get());
         EXPECT_EQ(install_complete->serial.ToString(), "CA:FE:A6:D2:84:9D");
         EXPECT_TRUE(install_complete->success);
         break;
       }
       case 8: {
         ASSERT_EQ(event->variant, "InstallTargetComplete");
-        const auto install_complete = dynamic_cast<event::InstallTargetComplete*>(event.get());
+        auto* const install_complete = dynamic_cast<event::InstallTargetComplete*>(event.get());
         EXPECT_EQ(install_complete->serial.ToString(), "secondary_ecu_serial");
         EXPECT_TRUE(install_complete->success);
         break;
       }
       case 9: {
         ASSERT_EQ(event->variant, "AllInstallsComplete");
-        const auto installs_complete = dynamic_cast<event::AllInstallsComplete*>(event.get());
+        auto* const installs_complete = dynamic_cast<event::AllInstallsComplete*>(event.get());
         EXPECT_EQ(installs_complete->result.ecu_reports.size(), 2);
         EXPECT_EQ(installs_complete->result.ecu_reports[0].install_res.result_code.num_code,
                   data::ResultCode::Numeric::kOk);
@@ -341,7 +342,7 @@ TEST(Aktualizr, FullWithUpdates) {
       }
       case 10: {
         ASSERT_EQ(event->variant, "PutManifestComplete");
-        const auto put_complete = dynamic_cast<event::PutManifestComplete*>(event.get());
+        auto* const put_complete = dynamic_cast<event::PutManifestComplete*>(event.get());
         EXPECT_TRUE(put_complete->success);
         ev_state.promise.set_value();
         break;
@@ -443,7 +444,7 @@ TEST(Aktualizr, SplitUpdates) {
     switch (ev_state.num_events) {
       case 0: {
         ASSERT_EQ(event->variant, "UpdateCheckComplete");
-        const auto targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
+        auto* const targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
         EXPECT_EQ(targets_event->result.ecus_count, 2);
         EXPECT_EQ(targets_event->result.updates.size(), 2u);
         EXPECT_EQ(targets_event->result.updates[0].filename(), "primary_firmware.txt");
@@ -453,14 +454,14 @@ TEST(Aktualizr, SplitUpdates) {
       }
       case 1: {
         ASSERT_EQ(event->variant, "DownloadTargetComplete");
-        const auto download_event = dynamic_cast<event::DownloadTargetComplete*>(event.get());
+        auto* const download_event = dynamic_cast<event::DownloadTargetComplete*>(event.get());
         EXPECT_TRUE(download_event->update.filename() == "primary_firmware.txt");
         EXPECT_TRUE(download_event->success);
         break;
       }
       case 2: {
         ASSERT_EQ(event->variant, "AllDownloadsComplete");
-        const auto downloads_complete = dynamic_cast<event::AllDownloadsComplete*>(event.get());
+        auto* const downloads_complete = dynamic_cast<event::AllDownloadsComplete*>(event.get());
         EXPECT_EQ(downloads_complete->result.updates.size(), 1);
         EXPECT_TRUE(downloads_complete->result.updates[0].filename() == "primary_firmware.txt");
         EXPECT_EQ(downloads_complete->result.status, result::DownloadStatus::kSuccess);
@@ -470,7 +471,7 @@ TEST(Aktualizr, SplitUpdates) {
         // Primary always gets installed first. (Not a requirement, just how it
         // works at present.)
         ASSERT_EQ(event->variant, "InstallStarted");
-        const auto install_started = dynamic_cast<event::InstallStarted*>(event.get());
+        auto* const install_started = dynamic_cast<event::InstallStarted*>(event.get());
         EXPECT_EQ(install_started->serial.ToString(), "CA:FE:A6:D2:84:9D");
         break;
       }
@@ -478,14 +479,14 @@ TEST(Aktualizr, SplitUpdates) {
         // Primary should complete before Secondary begins. (Again not a
         // requirement per se.)
         ASSERT_EQ(event->variant, "InstallTargetComplete");
-        const auto install_complete = dynamic_cast<event::InstallTargetComplete*>(event.get());
+        auto* const install_complete = dynamic_cast<event::InstallTargetComplete*>(event.get());
         EXPECT_EQ(install_complete->serial.ToString(), "CA:FE:A6:D2:84:9D");
         EXPECT_TRUE(install_complete->success);
         break;
       }
       case 5: {
         ASSERT_EQ(event->variant, "AllInstallsComplete");
-        const auto installs_complete = dynamic_cast<event::AllInstallsComplete*>(event.get());
+        auto* const installs_complete = dynamic_cast<event::AllInstallsComplete*>(event.get());
         EXPECT_EQ(installs_complete->result.ecu_reports.size(), 1);
         EXPECT_EQ(installs_complete->result.ecu_reports[0].install_res.result_code.num_code,
                   data::ResultCode::Numeric::kOk);
@@ -493,14 +494,14 @@ TEST(Aktualizr, SplitUpdates) {
       }
       case 6: {
         ASSERT_EQ(event->variant, "DownloadTargetComplete");
-        const auto download_event = dynamic_cast<event::DownloadTargetComplete*>(event.get());
+        auto* const download_event = dynamic_cast<event::DownloadTargetComplete*>(event.get());
         EXPECT_TRUE(download_event->update.filename() == "secondary_firmware.txt");
         EXPECT_TRUE(download_event->success);
         break;
       }
       case 7: {
         ASSERT_EQ(event->variant, "AllDownloadsComplete");
-        const auto downloads_complete = dynamic_cast<event::AllDownloadsComplete*>(event.get());
+        auto* const downloads_complete = dynamic_cast<event::AllDownloadsComplete*>(event.get());
         EXPECT_EQ(downloads_complete->result.updates.size(), 1);
         EXPECT_TRUE(downloads_complete->result.updates[0].filename() == "secondary_firmware.txt");
         EXPECT_EQ(downloads_complete->result.status, result::DownloadStatus::kSuccess);
@@ -508,20 +509,20 @@ TEST(Aktualizr, SplitUpdates) {
       }
       case 8: {
         ASSERT_EQ(event->variant, "InstallStarted");
-        const auto install_started = dynamic_cast<event::InstallStarted*>(event.get());
+        auto* const install_started = dynamic_cast<event::InstallStarted*>(event.get());
         EXPECT_EQ(install_started->serial.ToString(), "secondary_ecu_serial");
         break;
       }
       case 9: {
         ASSERT_EQ(event->variant, "InstallTargetComplete");
-        const auto install_complete = dynamic_cast<event::InstallTargetComplete*>(event.get());
+        auto* const install_complete = dynamic_cast<event::InstallTargetComplete*>(event.get());
         EXPECT_EQ(install_complete->serial.ToString(), "secondary_ecu_serial");
         EXPECT_TRUE(install_complete->success);
         break;
       }
       case 10: {
         ASSERT_EQ(event->variant, "AllInstallsComplete");
-        const auto installs_complete = dynamic_cast<event::AllInstallsComplete*>(event.get());
+        auto* const installs_complete = dynamic_cast<event::AllInstallsComplete*>(event.get());
         EXPECT_EQ(installs_complete->result.ecu_reports.size(), 1);
         EXPECT_EQ(installs_complete->result.ecu_reports[0].install_res.result_code.num_code,
                   data::ResultCode::Numeric::kOk);
@@ -529,7 +530,7 @@ TEST(Aktualizr, SplitUpdates) {
       }
       case 11: {
         ASSERT_EQ(event->variant, "UpdateCheckComplete");
-        const auto targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
+        auto* const targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
         EXPECT_EQ(targets_event->result.ecus_count, 0);
         EXPECT_EQ(targets_event->result.updates.size(), 0);
         EXPECT_EQ(targets_event->result.status, result::UpdateStatus::kNoUpdatesAvailable);
@@ -592,7 +593,7 @@ class HttpFakePutCounter : public HttpFake {
     return HttpResponse("", 200, CURLE_OK, "");
   }
 
-  size_t count_event_with_type(const std::string& event_type) {
+  size_t count_event_with_type(const std::string& event_type) const {
     auto c = std::count_if(events.cbegin(), events.cend(), [&event_type](const Json::Value& v) {
       return v["eventType"]["id"].asString() == event_type;
     });
@@ -1395,7 +1396,7 @@ TEST(Aktualizr, CheckNoUpdates) {
     switch (ev_state.num_events) {
       case 0: {
         ASSERT_EQ(event->variant, "UpdateCheckComplete");
-        const auto targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
+        auto* const targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
         EXPECT_EQ(targets_event->result.ecus_count, 0);
         EXPECT_EQ(targets_event->result.updates.size(), 0);
         EXPECT_EQ(targets_event->result.status, result::UpdateStatus::kNoUpdatesAvailable);
@@ -1403,7 +1404,7 @@ TEST(Aktualizr, CheckNoUpdates) {
       }
       case 1: {
         ASSERT_EQ(event->variant, "UpdateCheckComplete");
-        const auto targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
+        auto* const targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
         EXPECT_EQ(targets_event->result.ecus_count, 0);
         EXPECT_EQ(targets_event->result.updates.size(), 0);
         EXPECT_EQ(targets_event->result.status, result::UpdateStatus::kNoUpdatesAvailable);
@@ -1471,14 +1472,14 @@ TEST(Aktualizr, DownloadWithUpdates) {
     switch (ev_state.num_events) {
       case 0: {
         ASSERT_EQ(event->variant, "AllDownloadsComplete");
-        const auto downloads_complete = dynamic_cast<event::AllDownloadsComplete*>(event.get());
+        auto* const downloads_complete = dynamic_cast<event::AllDownloadsComplete*>(event.get());
         EXPECT_EQ(downloads_complete->result.updates.size(), 0);
         EXPECT_EQ(downloads_complete->result.status, result::DownloadStatus::kError);
         break;
       }
       case 1: {
         ASSERT_EQ(event->variant, "UpdateCheckComplete");
-        const auto targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
+        auto* const targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
         EXPECT_EQ(targets_event->result.ecus_count, 2);
         EXPECT_EQ(targets_event->result.updates.size(), 2u);
         EXPECT_EQ(targets_event->result.updates[0].filename(), "primary_firmware.txt");
@@ -1489,7 +1490,7 @@ TEST(Aktualizr, DownloadWithUpdates) {
       case 2:
       case 3: {
         ASSERT_EQ(event->variant, "DownloadTargetComplete");
-        const auto download_event = dynamic_cast<event::DownloadTargetComplete*>(event.get());
+        auto* const download_event = dynamic_cast<event::DownloadTargetComplete*>(event.get());
         EXPECT_TRUE(download_event->update.filename() == "primary_firmware.txt" ||
                     download_event->update.filename() == "secondary_firmware.txt");
         EXPECT_TRUE(download_event->success);
@@ -1497,7 +1498,7 @@ TEST(Aktualizr, DownloadWithUpdates) {
       }
       case 4: {
         ASSERT_EQ(event->variant, "AllDownloadsComplete");
-        const auto downloads_complete = dynamic_cast<event::AllDownloadsComplete*>(event.get());
+        auto* const downloads_complete = dynamic_cast<event::AllDownloadsComplete*>(event.get());
         EXPECT_EQ(downloads_complete->result.updates.size(), 2);
         EXPECT_TRUE(downloads_complete->result.updates[0].filename() == "primary_firmware.txt" ||
                     downloads_complete->result.updates[1].filename() == "primary_firmware.txt");
@@ -1539,11 +1540,10 @@ class HttpDownloadFailure : public HttpFake {
  public:
   using Responses = std::vector<std::pair<std::string, HttpResponse>>;
 
- public:
   HttpDownloadFailure(const boost::filesystem::path& test_dir_in, const Responses& file_to_response, std::string flavor,
                       const boost::filesystem::path& meta_dir_in)
-      : HttpFake(test_dir_in, flavor, meta_dir_in) {
-    for (auto resp : file_to_response) {
+      : HttpFake(test_dir_in, std::move(flavor), meta_dir_in) {
+    for (const auto& resp : file_to_response) {
       url_to_response_[tls_server + target_dir_ + resp.first] = resp.second;
     }
   }
@@ -1579,7 +1579,7 @@ class HttpDownloadFailure : public HttpFake {
 TEST(Aktualizr, DownloadFailures) {
   class DownloadEventHandler {
    public:
-    DownloadEventHandler(Aktualizr& aktualizr) {
+    explicit DownloadEventHandler(Aktualizr& aktualizr) {
       functor_ = std::bind(&DownloadEventHandler::operator(), this, std::placeholders::_1);
       aktualizr.SetSignalHandler(functor_);
     }
@@ -1588,17 +1588,16 @@ TEST(Aktualizr, DownloadFailures) {
       ASSERT_NE(event, nullptr);
 
       if (event->isTypeOf<event::DownloadTargetComplete>()) {
-        auto download_target_complete_event = dynamic_cast<event::DownloadTargetComplete*>(event.get());
+        auto* download_target_complete_event = dynamic_cast<event::DownloadTargetComplete*>(event.get());
         auto target_filename = download_target_complete_event->update.filename();
         download_status[target_filename] = download_target_complete_event->success;
 
       } else if (event->isTypeOf<event::AllDownloadsComplete>()) {
-        auto all_download_complete_event = dynamic_cast<event::AllDownloadsComplete*>(event.get());
+        auto* all_download_complete_event = dynamic_cast<event::AllDownloadsComplete*>(event.get());
         all_download_completed_status = all_download_complete_event->result;
       }
     }
 
-   public:
     std::map<std::string, bool> download_status;
     result::Download all_download_completed_status;
 
@@ -1612,7 +1611,7 @@ TEST(Aktualizr, DownloadFailures) {
     result::DownloadStatus allDownloadsStatus;
   };
 
-  TestParams test_case_params[]{
+  std::vector<TestParams> test_case_params{
       {// test case 0: each target download fails
        {{"primary_firmware.txt", HttpResponse("", 500, CURLE_HTTP_RETURNED_ERROR, "Internal Server Error")},
         {"secondary_firmware.txt", HttpResponse("", 500, CURLE_HTTP_RETURNED_ERROR, "Internal Server Error")}},
@@ -1862,13 +1861,13 @@ TEST(Aktualizr, InstallWithUpdates) {
     switch (ev_state.num_events) {
       case 0: {
         ASSERT_EQ(event->variant, "AllInstallsComplete");
-        const auto installs_complete = dynamic_cast<event::AllInstallsComplete*>(event.get());
+        auto* const installs_complete = dynamic_cast<event::AllInstallsComplete*>(event.get());
         EXPECT_EQ(installs_complete->result.ecu_reports.size(), 0);
         break;
       }
       case 1: {
         ASSERT_EQ(event->variant, "UpdateCheckComplete");
-        const auto targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
+        auto* const targets_event = dynamic_cast<event::UpdateCheckComplete*>(event.get());
         EXPECT_EQ(targets_event->result.ecus_count, 2);
         EXPECT_EQ(targets_event->result.updates.size(), 2u);
         EXPECT_EQ(targets_event->result.updates[0].filename(), "primary_firmware.txt");
@@ -1880,7 +1879,7 @@ TEST(Aktualizr, InstallWithUpdates) {
       case 2:
       case 3: {
         ASSERT_EQ(event->variant, "DownloadTargetComplete");
-        const auto download_event = dynamic_cast<event::DownloadTargetComplete*>(event.get());
+        auto* const download_event = dynamic_cast<event::DownloadTargetComplete*>(event.get());
         EXPECT_TRUE(download_event->update.filename() == "primary_firmware.txt" ||
                     download_event->update.filename() == "secondary_firmware.txt");
         EXPECT_TRUE(download_event->success);
@@ -1888,7 +1887,7 @@ TEST(Aktualizr, InstallWithUpdates) {
       }
       case 4: {
         ASSERT_EQ(event->variant, "AllDownloadsComplete");
-        const auto downloads_complete = dynamic_cast<event::AllDownloadsComplete*>(event.get());
+        auto* const downloads_complete = dynamic_cast<event::AllDownloadsComplete*>(event.get());
         EXPECT_EQ(downloads_complete->result.updates.size(), 2);
         EXPECT_TRUE(downloads_complete->result.updates[0].filename() == "primary_firmware.txt" ||
                     downloads_complete->result.updates[1].filename() == "primary_firmware.txt");
@@ -1900,13 +1899,13 @@ TEST(Aktualizr, InstallWithUpdates) {
       case 5: {
         // Secondary downloads first. (Not a requirement, just how it works at present.)
         ASSERT_EQ(event->variant, "InstallStarted");
-        const auto install_started = dynamic_cast<event::InstallStarted*>(event.get());
+        auto* const install_started = dynamic_cast<event::InstallStarted*>(event.get());
         EXPECT_EQ(install_started->serial.ToString(), "secondary_ecu_serial");
         break;
       }
       case 6: {
         ASSERT_EQ(event->variant, "InstallStarted");
-        const auto install_started = dynamic_cast<event::InstallStarted*>(event.get());
+        auto* const install_started = dynamic_cast<event::InstallStarted*>(event.get());
         EXPECT_EQ(install_started->serial.ToString(), "CA:FE:A6:D2:84:9D");
         break;
       }
@@ -1914,21 +1913,21 @@ TEST(Aktualizr, InstallWithUpdates) {
         // Primary should complete before Secondary begins. (Again not a
         // requirement per se.)
         ASSERT_EQ(event->variant, "InstallTargetComplete");
-        const auto install_complete = dynamic_cast<event::InstallTargetComplete*>(event.get());
+        auto* const install_complete = dynamic_cast<event::InstallTargetComplete*>(event.get());
         EXPECT_EQ(install_complete->serial.ToString(), "CA:FE:A6:D2:84:9D");
         EXPECT_TRUE(install_complete->success);
         break;
       }
       case 8: {
         ASSERT_EQ(event->variant, "InstallTargetComplete");
-        const auto install_complete = dynamic_cast<event::InstallTargetComplete*>(event.get());
+        auto* const install_complete = dynamic_cast<event::InstallTargetComplete*>(event.get());
         EXPECT_EQ(install_complete->serial.ToString(), "secondary_ecu_serial");
         EXPECT_TRUE(install_complete->success);
         break;
       }
       case 9: {
         ASSERT_EQ(event->variant, "AllInstallsComplete");
-        const auto installs_complete = dynamic_cast<event::AllInstallsComplete*>(event.get());
+        auto* const installs_complete = dynamic_cast<event::AllInstallsComplete*>(event.get());
         EXPECT_EQ(installs_complete->result.ecu_reports.size(), 2);
         EXPECT_EQ(installs_complete->result.ecu_reports[0].install_res.result_code.num_code,
                   data::ResultCode::Numeric::kOk);
@@ -2229,7 +2228,7 @@ TEST(Aktualizr, CustomInstallationRawReport) {
   result::Download download_result = aktualizr.Download(update_result.updates).get();
   result::Install install_result = aktualizr.Install(download_result.updates).get();
 
-  auto custom_raw_report = "Installation's custom raw report!";
+  const auto* custom_raw_report = "Installation's custom raw report!";
   EXPECT_TRUE(aktualizr.SetInstallationRawReport(custom_raw_report));
   aktualizr.SendManifest().get();
   EXPECT_EQ(http->last_manifest["signed"]["installation_report"]["report"]["raw_report"], custom_raw_report);
@@ -2242,15 +2241,18 @@ TEST(Aktualizr, CustomInstallationRawReport) {
 class CountUpdateCheckEvents {
  public:
   CountUpdateCheckEvents() = default;
-  // Non-copyable
+  ~CountUpdateCheckEvents() = default;
+  // Non-copyable / Non-movable
   CountUpdateCheckEvents(const CountUpdateCheckEvents&) = delete;
+  CountUpdateCheckEvents(CountUpdateCheckEvents&&) = delete;
   CountUpdateCheckEvents& operator=(const CountUpdateCheckEvents&) = delete;
+  CountUpdateCheckEvents& operator=(CountUpdateCheckEvents&&) = delete;
 
   std::function<void(std::shared_ptr<event::BaseEvent>)> Signal() {
     return std::bind(&CountUpdateCheckEvents::count, this, std::placeholders::_1);
   }
 
-  void count(std::shared_ptr<event::BaseEvent> event) {
+  void count(const std::shared_ptr<event::BaseEvent>& event) {
     std::cout << event->variant << "\n";
     if (event->variant == "UpdateCheckComplete") {
       total_events_++;
@@ -2282,6 +2284,7 @@ TEST(Aktualizr, APICheck) {
     boost::signals2::connection conn = aktualizr.SetSignalHandler(counter.Signal());
     aktualizr.Initialize();
     std::vector<std::future<result::UpdateCheck>> futures;
+    futures.reserve(5);
     for (int i = 0; i < 5; ++i) {
       futures.push_back(aktualizr.CheckUpdates());
     }
@@ -2385,26 +2388,26 @@ TEST(Aktualizr, PauseResumeQueue) {
   std::promise<void> end_promise{};
   size_t n_events = 0;
   std::atomic_bool is_paused{false};
-  std::function<void(std::shared_ptr<event::BaseEvent>)> cb = [&end_promise, &n_events, &mutex,
-                                                               &is_paused](std::shared_ptr<event::BaseEvent> event) {
-    switch (n_events) {
-      case 0:
-        ASSERT_EQ(event->variant, "UpdateCheckComplete");
-        break;
-      case 1: {
-        std::lock_guard<std::mutex> guard(mutex);
+  std::function<void(std::shared_ptr<event::BaseEvent>)> cb =
+      [&end_promise, &n_events, &mutex, &is_paused](const std::shared_ptr<event::BaseEvent>& event) {
+        switch (n_events) {
+          case 0:
+            ASSERT_EQ(event->variant, "UpdateCheckComplete");
+            break;
+          case 1: {
+            std::lock_guard<std::mutex> guard(mutex);
 
-        ASSERT_EQ(event->variant, "UpdateCheckComplete");
-        // the event shouldn't happen when the system is paused
-        EXPECT_FALSE(is_paused);
-        end_promise.set_value();
-        break;
-      }
-      default:
-        FAIL() << "Unexpected event";
-    }
-    n_events += 1;
-  };
+            ASSERT_EQ(event->variant, "UpdateCheckComplete");
+            // the event shouldn't happen when the system is paused
+            EXPECT_FALSE(is_paused);
+            end_promise.set_value();
+            break;
+          }
+          default:
+            FAIL() << "Unexpected event";
+        }
+        n_events += 1;
+      };
   boost::signals2::connection conn = aktualizr.SetSignalHandler(cb);
 
   // trigger the first UpdateCheck
@@ -2448,6 +2451,11 @@ class HttpSystemInfo : public HttpFake {
   HttpSystemInfo(const boost::filesystem::path& test_dir_in, const boost::filesystem::path& meta_dir_in)
       : HttpFake(test_dir_in, "", meta_dir_in) {}
 
+  HttpSystemInfo(const HttpSystemInfo&) = delete;
+  HttpSystemInfo(HttpSystemInfo&&) = delete;
+  HttpSystemInfo& operator=(const HttpSystemInfo&) = delete;
+  HttpSystemInfo& operator=(HttpSystemInfo&&) = delete;
+
   HttpResponse put(const std::string& url, const Json::Value& data) override {
     if (url.find(hwinfo_ep_) == url.length() - hwinfo_ep_.length()) {
       if (info_count_ == 0) {  // expect lshw data
@@ -2465,7 +2473,7 @@ class HttpSystemInfo : public HttpFake {
     return HttpResponse("", 404, CURLE_HTTP_RETURNED_ERROR, "Not found");
   }
 
-  ~HttpSystemInfo() { EXPECT_EQ(info_count_, 2); }
+  ~HttpSystemInfo() override { EXPECT_EQ(info_count_, 2); }
 
   int info_count_{0};
   std::string hwinfo_ep_{"/system_info"};
