@@ -348,7 +348,6 @@ AktualizrSecondary::ReturnCode AktualizrSecondary::putRootHdlr(Asn1Message& in_m
     repo_type = Uptane::RepositoryType::Director();
   } else if (pr->repotype == AKRepoType_image) {
     repo_type = Uptane::RepositoryType::Image();
-  } else {
   }
 
   const std::string json = ToString(pr->json);
