@@ -3,6 +3,7 @@
 
 #include <boost/filesystem/path.hpp>
 #include <string>
+#include <vector>
 
 #include "json/json.h"
 
@@ -14,6 +15,12 @@ class HttpFake : public HttpInterface {
   // old style HttpFake with centralized multi repo and url rewriting
   explicit HttpFake(boost::filesystem::path test_dir_in, std::string flavor = "",
                     boost::filesystem::path meta_dir_in = "");
+
+  // Non-copy non-moveable
+  HttpFake(const HttpFake &) = delete;
+  HttpFake(HttpFake &&) = delete;
+  HttpFake &operator=(const HttpFake &) = delete;
+  HttpFake &operator=(HttpFake &&) = delete;
 
   ~HttpFake() override = default;
 
@@ -30,11 +37,15 @@ class HttpFake : public HttpInterface {
   // rewrite xxx/yyy.json to xxx/yyy_flavor.json
   bool rewrite(std::string &url, const std::string &pattern) const;
 
+  // By default record the event names.
   virtual HttpResponse handle_event(const std::string &url, const Json::Value &data) {
     (void)url;
-    (void)data;
-    // do something in child instances
-    return HttpResponse("", 400, CURLE_OK, "");
+    for (const Json::Value &event : data) {
+      std::string event_type = event["eventType"]["id"].asString();
+      report_events_.push_back(std::move(event_type));
+    }
+
+    return HttpResponse("", 200, CURLE_OK, "");
   }
 
   using HttpInterface::get;
@@ -70,6 +81,8 @@ class HttpFake : public HttpInterface {
     return downloadAsync(url, write_cb, progress_cb, userp, from, nullptr).get();
   }
 
+  std::vector<std::string> report_events() const { return report_events_; }
+
   const std::string tls_server = "https://tlsserver.com";
   Json::Value last_manifest;
 
@@ -78,6 +91,7 @@ class HttpFake : public HttpInterface {
   std::string flavor_;
   boost::filesystem::path meta_dir;
   TemporaryDirectory temp_meta_dir;
+  std::vector<std::string> report_events_;
 };
 
 #endif  // HTTPFAKE_H_
