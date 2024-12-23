@@ -211,43 +211,13 @@ TEST(Aktualizr, DeviceInstallationResultMetadata) {
 
 #endif  // FIU_ENABLE
 
-class HttpFakeEventCounter : public HttpFake {
- public:
-  HttpFakeEventCounter(const boost::filesystem::path& test_dir_in, const boost::filesystem::path& meta_dir_in)
-      : HttpFake(test_dir_in, "hasupdates", meta_dir_in) {}
-
-  HttpResponse handle_event(const std::string& url, const Json::Value& data) override {
-    (void)url;
-    for (const Json::Value& event : data) {
-      ++events_seen;
-      std::string event_type = event["eventType"]["id"].asString();
-      if (event_type.find("Ecu") == 0) {
-        EXPECT_EQ(event["event"]["correlationId"], "id0");
-      }
-
-      std::cout << "got event #" << events_seen << ": " << event_type << "\n";
-      if (events_seen >= 1 && events_seen <= 4) {
-        EXPECT_TRUE(event_type == "EcuDownloadStarted" || event_type == "EcuDownloadCompleted");
-      } else if (events_seen >= 5 && events_seen <= 8) {
-        EXPECT_TRUE(event_type == "EcuInstallationStarted" || event_type == "EcuInstallationCompleted");
-      } else {
-        std::cout << "Unexpected event";
-        EXPECT_EQ(0, 1);
-      }
-    }
-    return HttpResponse("", 200, CURLE_OK, "");
-  }
-
-  unsigned int events_seen{0};
-};
-
 /*
  * Initialize -> UptaneCycle -> updates downloaded and installed for Primary and
  * Secondary.
  */
 TEST(Aktualizr, FullWithUpdates) {
   TemporaryDirectory temp_dir;
-  auto http = std::make_shared<HttpFakeEventCounter>(temp_dir.Path(), fake_meta_dir);
+  auto http = std::make_shared<HttpFake>(temp_dir.Path(), "hasupdates", fake_meta_dir);
   Config conf = UptaneTestCommon::makeTestConfig(temp_dir, http->tls_server);
 
   auto storage = INvStorage::newStorage(conf.storage);
@@ -364,52 +334,12 @@ TEST(Aktualizr, FullWithUpdates) {
   if (status != std::future_status::ready) {
     FAIL() << "Timed out waiting for installation to complete.";
   }
-  EXPECT_EQ(http->events_seen, 8);
+
+  EXPECT_EQ(http->report_events(),
+            (std::vector<std::string>{"EcuDownloadStarted", "EcuDownloadCompleted", "EcuDownloadStarted",
+                                      "EcuDownloadCompleted", "EcuInstallationStarted", "EcuInstallationStarted",
+                                      "EcuInstallationCompleted", "EcuInstallationCompleted"}));
 }
-
-class HttpFakeSplit : public HttpFake {
- public:
-  HttpFakeSplit(const boost::filesystem::path& test_dir_in, const boost::filesystem::path& meta_dir_in)
-      : HttpFake(test_dir_in, "hasupdates", meta_dir_in) {}
-
-  HttpResponse handle_event(const std::string& url, const Json::Value& data) override {
-    (void)url;
-    for (const Json::Value& event : data) {
-      ++events_seen;
-      std::string event_type = event["eventType"]["id"].asString();
-      if (event_type.find("Ecu") == 0) {
-        EXPECT_EQ(event["event"]["correlationId"], "id0");
-      }
-
-      std::cout << "got event #" << events_seen << ": " << event_type << "\n";
-      switch (events_seen) {
-        case 1:
-        case 5:
-          EXPECT_TRUE(event_type == "EcuDownloadStarted");
-          break;
-        case 2:
-        case 6:
-          EXPECT_TRUE(event_type == "EcuDownloadCompleted");
-          break;
-        case 3:
-        case 7:
-          EXPECT_TRUE(event_type == "EcuInstallationStarted");
-          break;
-        case 4:
-        case 8:
-          EXPECT_TRUE(event_type == "EcuInstallationCompleted");
-          break;
-        default:
-          std::cout << "Unexpected event";
-          EXPECT_EQ(0, 1);
-          break;
-      }
-    }
-    return HttpResponse("", 200, CURLE_OK, "");
-  }
-
-  unsigned int events_seen{0};
-};
 
 /*
  * Initialize -> CheckUpdates -> download and install one update -> download and
@@ -423,7 +353,7 @@ class HttpFakeSplit : public HttpFake {
  */
 TEST(Aktualizr, SplitUpdates) {
   TemporaryDirectory temp_dir;
-  auto http = std::make_shared<HttpFakeSplit>(temp_dir.Path(), fake_meta_dir);
+  auto http = std::make_shared<HttpFake>(temp_dir.Path(), "hasupdates", fake_meta_dir);
   Config conf = UptaneTestCommon::makeTestConfig(temp_dir, http->tls_server);
 
   auto storage = INvStorage::newStorage(conf.storage);
@@ -569,7 +499,10 @@ TEST(Aktualizr, SplitUpdates) {
   if (status != std::future_status::ready) {
     FAIL() << "Timed out waiting for installation to complete.";
   }
-  EXPECT_EQ(http->events_seen, 8);
+  EXPECT_EQ(http->report_events(),
+            (std::vector<std::string>{"EcuDownloadStarted", "EcuDownloadCompleted", "EcuInstallationStarted",
+                                      "EcuInstallationCompleted", "EcuDownloadStarted", "EcuDownloadCompleted",
+                                      "EcuInstallationStarted", "EcuInstallationCompleted"}));
 }
 
 class HttpFakePutCounter : public HttpFake {
@@ -715,41 +648,17 @@ class HttpInstallationFailed : public HttpFake {
       : HttpFake(test_dir_in, "hasupdates", meta_dir_in) {}
 
   HttpResponse handle_event(const std::string& url, const Json::Value& data) override {
-    (void)url;
-
+    HttpFake::handle_event(url, data);
     for (const auto& event_data : data) {
       auto event_id = event_data["eventType"]["id"].asString();
-      auto ecu = event_data["event"]["ecu"].asString();
-      auto correlationID = event_data["event"]["correlationId"].asString();
 
       if (event_id == "EcuInstallationCompleted") {
+        auto ecu = event_data["event"]["ecu"].asString();
+        auto correlationID = event_data["event"]["correlationId"].asString();
         install_completion_status_[ecu] = event_data["event"]["success"].asBool();
       }
-      report_events_.push_back(event_id);
     }
     return HttpResponse("", 200, CURLE_OK, "");
-  }
-
-  bool checkReceivedReports(const std::vector<std::string>& expected_event_order) const {
-    auto received_event_it = report_events_.begin();
-
-    int expected_index = 0;
-    for (const auto& expected_event : expected_event_order) {
-      if (received_event_it == report_events_.end()) {
-        std::cout << "checkReceivedReports expected " << expected_event << " but no more reports remain at index "
-                  << expected_index << "\n";
-        return false;
-      }
-      auto received_event = *received_event_it;
-      if (expected_event != received_event) {
-        std::cout << "checkReceivedReports expected " << expected_event << " got " << received_event << " at index "
-                  << expected_index << "\n";
-        return false;
-      }
-      ++received_event_it;
-      expected_index++;
-    }
-    return true;
   }
 
   bool wasInstallSuccessful(const std::string& ecu_serial) const {
@@ -763,7 +672,6 @@ class HttpInstallationFailed : public HttpFake {
   void clearReportEvents() { report_events_.clear(); }
 
  private:
-  std::vector<std::string> report_events_;
   std::unordered_map<std::string, bool> install_completion_status_;
 };
 
@@ -776,36 +684,19 @@ class EventHandler {
 
   void operator()(const std::shared_ptr<event::BaseEvent>& event) {
     ASSERT_NE(event, nullptr);
-    received_events_.push_back(event->variant);
-  }
-
-  bool checkReceivedEvents(const std::vector<std::string>& expected_event_order) const {
-    auto received_event_it = received_events_.begin();
-
-    int expected_index = 0;
-    for (const auto& expected_event : expected_event_order) {
-      if (received_event_it == received_events_.end()) {
-        std::cout << "checkReceivedEvents expected " << expected_event << " but no more events remain at index "
-                  << expected_index << "\n";
-        return false;
+    const auto& variant = event->variant;
+    bool skip = false;
+    if (variant == "DownloadProgressReport") {
+      if (!received_events_.empty() && received_events_.back() == "DownloadProgressReport") {
+        skip = true;
       }
-      auto received_event = *received_event_it;
-      if (expected_event != received_event) {
-        std::cout << "checkReceivedEvents expected " << expected_event << " got " << received_event << " at index "
-                  << expected_index << "\n";
-        return false;
-      }
-
-      if (received_event == "DownloadProgressReport") {
-        while (*(++received_event_it) == "DownloadProgressReport") {
-        }
-      } else {
-        ++received_event_it;
-      }
-      expected_index++;
     }
-    return true;
+    if (!skip) {
+      received_events_.push_back(variant);
+    }
   }
+
+  [[nodiscard]] std::vector<std::string> events() const { return received_events_; }
 
   void clear() { received_events_.clear(); }
 
@@ -885,9 +776,9 @@ TEST(Aktualizr, FinalizationFailure) {
 
     ASSERT_EQ(aktualizr_cycle_thread_status, std::future_status::ready);
     EXPECT_TRUE(aktualizr.uptane_client()->isInstallCompletionRequired());
-    EXPECT_TRUE(event_hdlr.checkReceivedEvents(expected_event_order));
+    EXPECT_EQ(event_hdlr.events(), expected_event_order);
     EXPECT_TRUE(aktualizr.uptane_client()->hasPendingUpdates());
-    EXPECT_TRUE(http_server_mock->checkReceivedReports(expected_report_order));
+    EXPECT_EQ(http_server_mock->report_events(), expected_report_order);
     // Aktualizr reports to a server that installation was successfull for the Secondary
     // checkReceivedReports() verifies whether EcuInstallationApplied was reported for the Primary
     EXPECT_FALSE(http_server_mock->wasInstallSuccessful(primary_ecu_id));
@@ -951,7 +842,7 @@ TEST(Aktualizr, FinalizationFailure) {
     fiu_disable("fake_install_finalization_failure");
 
     EXPECT_FALSE(aktualizr.uptane_client()->hasPendingUpdates());
-    EXPECT_TRUE(http_server_mock->checkReceivedReports({"EcuInstallationCompleted"}));
+    EXPECT_EQ(http_server_mock->report_events(), (std::vector<std::string>{"EcuInstallationCompleted"}));
     EXPECT_FALSE(http_server_mock->wasInstallSuccessful(primary_ecu_id));
 
     data::InstallationResult dev_installation_res;
@@ -993,15 +884,18 @@ TEST_F(AktualizrFailureTest, Primary) {
   aktualizr_.uptane_client()->completeInstall();
 
   // We get these events
-  EXPECT_TRUE(event_hdlr.checkReceivedEvents(std::vector<std::string>{
-      "SendDeviceDataComplete", "UpdateCheckComplete", "DownloadProgressReport", "DownloadTargetComplete",
-      "DownloadProgressReport", "DownloadTargetComplete", "AllDownloadsComplete", "InstallStarted", "InstallStarted",
-      "InstallTargetComplete", "AllInstallsComplete", "PutManifestComplete"}));
+  EXPECT_EQ(event_hdlr.events(),
+            (std::vector<std::string>{"SendDeviceDataComplete", "UpdateCheckComplete", "DownloadProgressReport",
+                                      "DownloadTargetComplete", "DownloadProgressReport", "DownloadTargetComplete",
+                                      "AllDownloadsComplete", "InstallStarted", "InstallStarted",
+                                      "InstallTargetComplete", "AllInstallsComplete", "PutManifestComplete"}));
 
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
-  EXPECT_TRUE(http_server_mock_->checkReceivedReports(
-      std::vector<std::string>{"EcuDownloadStarted", "EcuDownloadCompleted", "EcuDownloadStarted",
-                               "EcuDownloadCompleted", "EcuInstallationStarted"}));
+
+  EXPECT_EQ(http_server_mock_->report_events(),
+            (std::vector<std::string>{"EcuDownloadStarted", "EcuDownloadCompleted", "EcuDownloadStarted",
+                                      "EcuDownloadCompleted", "EcuInstallationStarted", "EcuInstallationStarted",
+                                      "EcuInstallationCompleted"}));
 
   EXPECT_FALSE(http_server_mock_->wasInstallSuccessful(primary_ecu_id));
   // If we failed to install on the primary, we won't try the secondary
@@ -1043,15 +937,16 @@ TEST_F(AktualizrFailureTest, SecondaryDownloadFails) {
   aktualizr_.UptaneCycle();
   aktualizr_.uptane_client()->completeInstall();
 
-  EXPECT_TRUE(event_hdlr.checkReceivedEvents(std::vector<std::string>{
-      "SendDeviceDataComplete", "UpdateCheckComplete", "DownloadProgressReport", "DownloadTargetComplete",
-      "DownloadProgressReport", "DownloadTargetComplete", "AllDownloadsComplete", "InstallStarted",
-      "AllInstallsComplete", "PutManifestComplete"}));
+  EXPECT_EQ(event_hdlr.events(),
+            (std::vector<std::string>{"SendDeviceDataComplete", "UpdateCheckComplete", "DownloadProgressReport",
+                                      "DownloadTargetComplete", "DownloadProgressReport", "DownloadTargetComplete",
+                                      "AllDownloadsComplete", "InstallStarted", "AllInstallsComplete",
+                                      "PutManifestComplete"}));
 
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
-  EXPECT_TRUE(http_server_mock_->checkReceivedReports(
-      std::vector<std::string>{"EcuDownloadStarted", "EcuDownloadCompleted", "EcuDownloadStarted",
-                               "EcuDownloadCompleted", "EcuInstallationStarted"}));
+  EXPECT_EQ(http_server_mock_->report_events(),
+            (std::vector<std::string>{"EcuDownloadStarted", "EcuDownloadCompleted", "EcuDownloadStarted",
+                                      "EcuDownloadCompleted", "EcuInstallationStarted"}));
 
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
   EXPECT_FALSE(http_server_mock_->wasInstallSuccessful(primary_ecu_id));
@@ -1083,15 +978,18 @@ TEST_F(AktualizrFailureTest, SecondaryInstallFails) {
   aktualizr_.UptaneCycle();
   aktualizr_.uptane_client()->completeInstall();
 
-  EXPECT_TRUE(event_hdlr.checkReceivedEvents(std::vector<std::string>{
-      "SendDeviceDataComplete", "UpdateCheckComplete", "DownloadProgressReport", "DownloadTargetComplete",
-      "DownloadProgressReport", "DownloadTargetComplete", "AllDownloadsComplete", "InstallStarted", "InstallStarted",
-      "InstallTargetComplete", "InstallTargetComplete", "AllInstallsComplete", "PutManifestComplete"}));
+  EXPECT_EQ(
+      event_hdlr.events(),
+      (std::vector<std::string>{"SendDeviceDataComplete", "UpdateCheckComplete", "DownloadProgressReport",
+                                "DownloadTargetComplete", "DownloadProgressReport", "DownloadTargetComplete",
+                                "AllDownloadsComplete", "InstallStarted", "InstallStarted", "InstallTargetComplete",
+                                "InstallTargetComplete", "AllInstallsComplete", "PutManifestComplete"}));
 
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
-  EXPECT_TRUE(http_server_mock_->checkReceivedReports(
-      std::vector<std::string>{"EcuDownloadStarted", "EcuDownloadCompleted", "EcuDownloadStarted",
-                               "EcuDownloadCompleted", "EcuInstallationStarted"}));
+  EXPECT_EQ(http_server_mock_->report_events(),
+            (std::vector<std::string>{"EcuDownloadStarted", "EcuDownloadCompleted", "EcuDownloadStarted",
+                                      "EcuDownloadCompleted", "EcuInstallationStarted", "EcuInstallationStarted",
+                                      "EcuInstallationCompleted", "EcuInstallationCompleted"}));
 
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
   EXPECT_TRUE(http_server_mock_->wasInstallSuccessful(primary_ecu_id));
@@ -1124,15 +1022,17 @@ TEST_F(AktualizrFailureTest, PrimaryAndSecondaryInstallFails) {
   aktualizr_.UptaneCycle();
   aktualizr_.uptane_client()->completeInstall();
 
-  EXPECT_TRUE(event_hdlr.checkReceivedEvents(std::vector<std::string>{
-      "SendDeviceDataComplete", "UpdateCheckComplete", "DownloadProgressReport", "DownloadTargetComplete",
-      "DownloadProgressReport", "DownloadTargetComplete", "AllDownloadsComplete", "InstallStarted", "InstallStarted",
-      "InstallTargetComplete", "AllInstallsComplete", "PutManifestComplete"}));
+  EXPECT_EQ(event_hdlr.events(),
+            (std::vector<std::string>{"SendDeviceDataComplete", "UpdateCheckComplete", "DownloadProgressReport",
+                                      "DownloadTargetComplete", "DownloadProgressReport", "DownloadTargetComplete",
+                                      "AllDownloadsComplete", "InstallStarted", "InstallStarted",
+                                      "InstallTargetComplete", "AllInstallsComplete", "PutManifestComplete"}));
 
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
-  EXPECT_TRUE(http_server_mock_->checkReceivedReports(
-      std::vector<std::string>{"EcuDownloadStarted", "EcuDownloadCompleted", "EcuDownloadStarted",
-                               "EcuDownloadCompleted", "EcuInstallationStarted"}));
+  EXPECT_EQ(http_server_mock_->report_events(),
+            (std::vector<std::string>{"EcuDownloadStarted", "EcuDownloadCompleted", "EcuDownloadStarted",
+                                      "EcuDownloadCompleted", "EcuInstallationStarted", "EcuInstallationStarted",
+                                      "EcuInstallationCompleted"}));
 
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
   EXPECT_FALSE(http_server_mock_->wasInstallSuccessful(primary_ecu_id));
@@ -1161,15 +1061,18 @@ TEST_F(AktualizrFailureTest, HappyPath) {
   aktualizr_.UptaneCycle();
   aktualizr_.uptane_client()->completeInstall();
 
-  EXPECT_TRUE(event_hdlr.checkReceivedEvents(std::vector<std::string>{
-      "SendDeviceDataComplete", "UpdateCheckComplete", "DownloadProgressReport", "DownloadTargetComplete",
-      "DownloadProgressReport", "DownloadTargetComplete", "AllDownloadsComplete", "InstallStarted", "InstallStarted",
-      "InstallTargetComplete", "InstallTargetComplete", "AllInstallsComplete", "PutManifestComplete"}));
+  EXPECT_EQ(
+      event_hdlr.events(),
+      (std::vector<std::string>{"SendDeviceDataComplete", "UpdateCheckComplete", "DownloadProgressReport",
+                                "DownloadTargetComplete", "DownloadProgressReport", "DownloadTargetComplete",
+                                "AllDownloadsComplete", "InstallStarted", "InstallStarted", "InstallTargetComplete",
+                                "InstallTargetComplete", "AllInstallsComplete", "PutManifestComplete"}));
 
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
-  EXPECT_TRUE(http_server_mock_->checkReceivedReports(
-      std::vector<std::string>{"EcuDownloadStarted", "EcuDownloadCompleted", "EcuDownloadStarted",
-                               "EcuDownloadCompleted", "EcuInstallationStarted"}));
+  EXPECT_EQ(http_server_mock_->report_events(),
+            (std::vector<std::string>{"EcuDownloadStarted", "EcuDownloadCompleted", "EcuDownloadStarted",
+                                      "EcuDownloadCompleted", "EcuInstallationStarted", "EcuInstallationStarted",
+                                      "EcuInstallationCompleted", "EcuInstallationCompleted"}));
 
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
   EXPECT_TRUE(http_server_mock_->wasInstallSuccessful(primary_ecu_id));
@@ -2451,11 +2354,6 @@ class HttpSystemInfo : public HttpFake {
   HttpSystemInfo(const boost::filesystem::path& test_dir_in, const boost::filesystem::path& meta_dir_in)
       : HttpFake(test_dir_in, "", meta_dir_in) {}
 
-  HttpSystemInfo(const HttpSystemInfo&) = delete;
-  HttpSystemInfo(HttpSystemInfo&&) = delete;
-  HttpSystemInfo& operator=(const HttpSystemInfo&) = delete;
-  HttpSystemInfo& operator=(HttpSystemInfo&&) = delete;
-
   HttpResponse put(const std::string& url, const Json::Value& data) override {
     if (url.find(hwinfo_ep_) == url.length() - hwinfo_ep_.length()) {
       if (info_count_ == 0) {  // expect lshw data
@@ -2473,8 +2371,9 @@ class HttpSystemInfo : public HttpFake {
     return HttpResponse("", 404, CURLE_HTTP_RETURNED_ERROR, "Not found");
   }
 
-  ~HttpSystemInfo() override { EXPECT_EQ(info_count_, 2); }
+  int info_count() const { return info_count_; }
 
+ private:
   int info_count_{0};
   std::string hwinfo_ep_{"/system_info"};
 };
@@ -2493,6 +2392,8 @@ TEST(Aktualizr, CustomHwInfo) {
   auto hwinfo = Utils::parseJSON(custom_hwinfo);
   aktualizr.SetCustomHardwareInfo(hwinfo);
   aktualizr.SendDeviceData().get();
+
+  EXPECT_EQ(http->info_count(), 2);
 }
 
 #ifndef __NO_MAIN__
