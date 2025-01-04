@@ -10,6 +10,7 @@
 #include "libaktualizr/campaign.h"
 #include "libaktualizr/types.h"
 #include "logging/logging.h"
+#include "primary/reportqueue.h"
 #include "primary/secondary_install_job.h"
 #include "provisioner.h"
 #include "uptane/exceptions.h"
@@ -802,6 +803,17 @@ void SotaUptaneClient::reportPause() {
 void SotaUptaneClient::reportResume() {
   auto correlation_id = director_repo.getCorrelationId();
   report_queue->enqueue(std_::make_unique<DeviceResumedReport>(correlation_id));
+}
+
+void SotaUptaneClient::reportAwaitingConsent() {
+  auto correlation_id = director_repo.getCorrelationId();
+  report_queue->enqueue(std::make_unique<AwaitingConsentReport>(correlation_id));
+}
+
+void SotaUptaneClient::reportConsentOutcome(const Consent::Outcome &consent_outcome) {
+  auto correlation_id = director_repo.getCorrelationId();
+  report_queue->enqueue(
+      std::make_unique<ConsentOutcomeReport>(correlation_id, consent_outcome.granted, consent_outcome.reason));
 }
 
 std::pair<bool, Uptane::Target> SotaUptaneClient::downloadImage(const Uptane::Target &target, UpdateType utype) {

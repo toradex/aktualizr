@@ -1,17 +1,21 @@
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <fstream>
+#include <future>
 
 #include <sodium.h>
 
+#include "json/json.h"
 #include "libaktualizr/aktualizr.h"
 #include "libaktualizr/events.h"
+#include "logging/logging.h"
+#include "primary/consent.h"
 #include "primary/sotauptaneclient.h"
 #include "primary/update_lock_file.h"
 #include "utilities/apiqueue.h"
 #include "utilities/timer.h"
 
-namespace fs = boost::filesystem;
+namespace fs = boost::filesystem;  // NOLINT Used when building for offline updates
 
 Aktualizr::Aktualizr(const Config &config)
     : Aktualizr(config, INvStorage::newStorage(config.storage), std::make_shared<HttpClient>()) {}
@@ -83,6 +87,9 @@ std::ostream &operator<<(std::ostream &os, Aktualizr::UpdateCycleState state) {
     case Aktualizr::UpdateCycleState::kCheckingForUpdates:
       os << "CheckingForUpdates";
       break;
+    case Aktualizr::UpdateCycleState::kGetConsent:
+      os << "GetConsent";
+      break;
     case Aktualizr::UpdateCycleState::kDownloading:
       os << "Downloading";
       break;
@@ -146,10 +153,14 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
         case UpdateCycleState::kIdle:
         case UpdateCycleState::kSendingManifest:
         case UpdateCycleState::kCheckingForUpdates:
+        case UpdateCycleState::kGetConsent:
         case UpdateCycleState::kDownloading:
         case UpdateCycleState::kInstalling:
           // In these cases we need to poll for Offline updates
           if (OfflineUpdateAvailable()) {
+            if (state_ == UpdateCycleState::kGetConsent) {
+              consent_->PendingUpdateCancelled();
+            }
             api_queue_->abort();
             // TODO: How can we send an 'update failed' the next time we have idle network
             op_update_check_ = CheckUpdatesOffline(config_.uptane.offline_updates_source);
@@ -239,14 +250,14 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
         break;
       case UpdateCycleState::kCheckingForUpdates:
         if (op_update_check_.wait_until(next_offline_poll_) == std::future_status::ready) {
-          result::UpdateCheck const update_result = op_update_check_.get();
+          update_result_ = op_update_check_.get();
           if (update_lock_file_.ShouldUpdate() == UpdateLockFile::kNoUpdate) {
             next_online_poll_ = now + std::chrono::seconds(config_.uptane.polling_sec);
             state_ = UpdateCycleState::kIdle;
             break;
           }
-          if (update_result.updates.empty()) {
-            if (update_result.status == result::UpdateStatus::kError) {
+          if (update_result_.updates.empty()) {
+            if (update_result_.status == result::UpdateStatus::kError) {
               op_bool_ = SendManifest();
               state_ = UpdateCycleState::kSendingManifest;
               break;
@@ -256,8 +267,22 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
             break;
           }
           // Got an update
-          op_download_ = Download(update_result.updates);
-          state_ = UpdateCycleState::kDownloading;
+          op_consent_ = consent_->GetConsent(update_result_.updates);
+          uptane_client_->reportAwaitingConsent();
+          state_ = UpdateCycleState::kGetConsent;
+        }
+        break;
+      case UpdateCycleState::kGetConsent:
+        if (op_consent_.wait_until(next_offline_poll_) == std::future_status::ready) {
+          auto consent = op_consent_.get();
+          // uptane_client_->reportConsentOutcome(consent);
+          if (consent.granted) {
+            op_download_ = Download(update_result_.updates);
+            state_ = UpdateCycleState::kDownloading;
+          } else {
+            LOG_WARNING << "User refused consent of update :" << consent.reason;
+            state_ = UpdateCycleState::kIdle;
+          }
         }
         break;
       case UpdateCycleState::kDownloading:
@@ -297,18 +322,18 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
         break;
 #ifdef BUILD_OFFLINE_UPDATES
       case UpdateCycleState::kCheckingForUpdatesOffline: {
-        result::UpdateCheck const update_result = op_update_check_.get();  // No need to timeout
-        if (update_result.updates.empty() || update_lock_file_.ShouldUpdate() == UpdateLockFile::kNoUpdate) {
+        update_result_ = op_update_check_.get();  // No need to timeout
+        if (update_result_.updates.empty() || update_lock_file_.ShouldUpdate() == UpdateLockFile::kNoUpdate) {
           next_online_poll_ = now + std::chrono::seconds(config_.uptane.polling_sec);
           state_ = UpdateCycleState::kIdle;
           break;
         }
-        if (update_result.status == result::UpdateStatus::kError) {
+        if (update_result_.status == result::UpdateStatus::kError) {
           op_bool_ = SendManifest();
           state_ = UpdateCycleState::kSendingManifest;
           break;
         }
-        op_download_ = Download(update_result.updates, UpdateType::kOffline);
+        op_download_ = Download(update_result_.updates, UpdateType::kOffline);
         state_ = UpdateCycleState::kFetchingImagesOffline;
         break;
       }

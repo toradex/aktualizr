@@ -84,6 +84,16 @@ class EcuInstallationCompletedReport : public ReportEvent {
   EcuInstallationCompletedReport(const Uptane::EcuSerial& ecu, const std::string& correlation_id, bool success);
 };
 
+class AwaitingConsentReport : public ReportEvent {
+ public:
+  explicit AwaitingConsentReport(const std::string& correlation_id);
+};
+
+class ConsentOutcomeReport : public ReportEvent {
+ public:
+  ConsentOutcomeReport(const std::string& correlation_id, bool granted, const std::string& reason);
+};
+
 class ReportQueue {
  public:
   ReportQueue(const Config& config_in, std::shared_ptr<HttpInterface> http_client,

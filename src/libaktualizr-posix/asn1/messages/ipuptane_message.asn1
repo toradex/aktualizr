@@ -28,6 +28,7 @@ IpUptane DEFINITIONS ::= BEGIN
     needCompletion(21),
     customError(22),
     operationCancelled(23),
+    consentRefused(24),
     unknown(-1),
     ...
   }

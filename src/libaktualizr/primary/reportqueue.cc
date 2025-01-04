@@ -170,3 +170,14 @@ EcuInstallationCompletedReport::EcuInstallationCompletedReport(const Uptane::Ecu
   setCorrelationId(correlation_id);
   custom["success"] = success;
 }
+
+AwaitingConsentReport::AwaitingConsentReport(const std::string& correlation_id) : ReportEvent("AwaitingConsent", 0) {
+  setCorrelationId(correlation_id);
+}
+
+ConsentOutcomeReport::ConsentOutcomeReport(const std::string& correlation_id, bool granted, const std::string& reason)
+    : ReportEvent("ConsentOutcome", 0) {
+  setCorrelationId(correlation_id);
+  custom["reason"] = reason;
+  custom["granted"] = granted;
+}

@@ -264,6 +264,8 @@ struct ResultCode {
     kCustomError = 22,
     // The operation was explicitly cancelled, either by an offline update or explicit user choice
     kOperationCancelled = 23,
+    // The user refused consent to install the update
+    kConsentRefused = 24,
     // Unknown
     kUnknown = -1,
   };

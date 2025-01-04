@@ -8,6 +8,7 @@ set(SOURCES aktualizr.cc
             update_lock_file.cc)
 
 set(HEADERS aktualizr_helpers.h
+            consent.h
             provisioner.h
             reportqueue.h
             secondary_config.h
