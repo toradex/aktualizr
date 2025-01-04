@@ -8,6 +8,7 @@
 #include "crypto/crypto.h"
 #include "crypto/keymanager.h"
 #include "libaktualizr/campaign.h"
+#include "libaktualizr/types.h"
 #include "logging/logging.h"
 #include "primary/secondary_install_job.h"
 #include "provisioner.h"
@@ -1067,16 +1068,16 @@ result::UpdateStatus SotaUptaneClient::checkUpdatesOffline(const std::vector<Upt
   // metadata.
   for (const auto &target : targets) {
     TargetCompare target_comp(target);
-    const auto it = std::find_if(director_targets.cbegin(), director_targets.cend(), target_comp);
-    if (it == director_targets.cend()) {
+    const auto director_target = std::find_if(director_targets.cbegin(), director_targets.cend(), target_comp);
+    if (director_target == director_targets.cend()) {
       LOG_ERROR << "No matching target in Director Targets metadata for " << target;
-      throw Uptane::Exception(Uptane::RepositoryType::DIRECTOR, "No matching target in Director Targets metadata");
+      throw Uptane::Exception(Uptane::RepositoryType::Director(), "No matching target in Director Targets metadata");
     }
 
     const auto image_target = findTargetInDelegationTree(target, true, utype);
     if (image_target == nullptr) {
       LOG_ERROR << "No matching target in Image repo Targets metadata for " << target;
-      throw Uptane::Exception(Uptane::RepositoryType::IMAGE, "No matching target in Director Targets metadata");
+      throw Uptane::Exception(Uptane::RepositoryType::Image(), "No matching target in Image Targets metadata");
     }
   }
 

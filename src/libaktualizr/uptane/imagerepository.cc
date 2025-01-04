@@ -28,7 +28,7 @@ void ImageRepository::verifyTimestamp(const std::string& timestamp_raw) {
 
 void ImageRepository::checkTimestampExpired() {
   if (timestamp.isExpired(Now())) {
-    throw Uptane::ExpiredMetadata(type.ToString(), Role::TIMESTAMP);
+    throw Uptane::ExpiredMetadata(type, Role::TIMESTAMP);
   }
 }
 
@@ -48,7 +48,7 @@ void ImageRepository::fetchSnapshot(INvStorage& storage, const IMetadataFetcher&
   verifySnapshot(image_snapshot, false);
 
   if (local_version > remote_version) {
-    throw Uptane::SecurityException(RepositoryType::IMAGE, "Rollback attempt");
+    throw Uptane::SecurityException(RepositoryType::Image(), "Rollback attempt");
   } else {
     storage.storeNonRoot(image_snapshot, RepositoryType::Image(), Role::Snapshot());
   }
@@ -64,7 +64,7 @@ void ImageRepository::verifySnapshot(const std::string& snapshot_raw, bool prefe
           if (!prefetch) {
             LOG_ERROR << "Hash verification for Snapshot metadata failed";
           }
-          throw Uptane::SecurityException(RepositoryType::IMAGE, "Snapshot metadata hash verification failed");
+          throw Uptane::SecurityException(RepositoryType::Image(), "Snapshot metadata hash verification failed");
         }
         hash_exists = true;
         break;
@@ -73,7 +73,7 @@ void ImageRepository::verifySnapshot(const std::string& snapshot_raw, bool prefe
           if (!prefetch) {
             LOG_ERROR << "Hash verification for Snapshot metadata failed";
           }
-          throw Uptane::SecurityException(RepositoryType::IMAGE, "Snapshot metadata hash verification failed");
+          throw Uptane::SecurityException(RepositoryType::Image(), "Snapshot metadata hash verification failed");
         }
         hash_exists = true;
         break;
@@ -84,7 +84,7 @@ void ImageRepository::verifySnapshot(const std::string& snapshot_raw, bool prefe
 
   if (!hash_exists) {
     LOG_ERROR << "No hash found for shapshot.json";
-    throw Uptane::SecurityException(RepositoryType::IMAGE, "Snapshot metadata hash verification failed");
+    throw Uptane::SecurityException(RepositoryType::Image(), "Snapshot metadata hash verification failed");
   }
 
   try {
@@ -97,13 +97,13 @@ void ImageRepository::verifySnapshot(const std::string& snapshot_raw, bool prefe
   }
 
   if (snapshot.version() != timestamp.snapshot_version()) {
-    throw Uptane::VersionMismatch(RepositoryType::IMAGE, Uptane::Role::SNAPSHOT);
+    throw Uptane::VersionMismatch(RepositoryType::Image(), Uptane::Role::SNAPSHOT);
   }
 }
 
 void ImageRepository::checkSnapshotExpired() {
   if (snapshot.isExpired(Now())) {
-    throw Uptane::ExpiredMetadata(type.ToString(), Role::SNAPSHOT);
+    throw Uptane::ExpiredMetadata(type, Role::SNAPSHOT);
   }
 }
 
@@ -124,7 +124,7 @@ void ImageRepository::fetchTargets(INvStorage& storage, const IMetadataFetcher& 
   verifyTargets(image_targets, false);
 
   if (local_version > remote_version) {
-    throw Uptane::SecurityException(RepositoryType::IMAGE, "Rollback attempt");
+    throw Uptane::SecurityException(RepositoryType::Image(), "Rollback attempt");
   } else {
     storage.storeNonRoot(image_targets, RepositoryType::Image(), targets_role);
   }
@@ -144,7 +144,7 @@ void ImageRepository::verifyRoleHashes(const std::string& role_data, const Uptan
           if (!prefetch) {
             LOG_ERROR << "Hash verification for " << role << " metadata failed";
           }
-          throw Uptane::SecurityException(RepositoryType::IMAGE,
+          throw Uptane::SecurityException(RepositoryType::Image(),
                                           "Snapshot hash mismatch for " + role.ToString() + " metadata");
         }
         break;
@@ -153,7 +153,7 @@ void ImageRepository::verifyRoleHashes(const std::string& role_data, const Uptan
           if (!prefetch) {
             LOG_ERROR << "Hash verification for " << role << " metadata failed";
           }
-          throw Uptane::SecurityException(RepositoryType::IMAGE,
+          throw Uptane::SecurityException(RepositoryType::Image(),
                                           "Snapshot hash mismatch for " + role.ToString() + " metadata");
         }
         break;
@@ -182,7 +182,7 @@ void ImageRepository::verifyTargets(const std::string& targets_raw, bool prefetc
 
     // PURE-2 step 8(ii)
     if (targets->version() != snapshot.role_version(Uptane::Role::Targets())) {
-      throw Uptane::VersionMismatch(RepositoryType::IMAGE, Uptane::Role::TARGETS);
+      throw Uptane::VersionMismatch(RepositoryType::Image(), Uptane::Role::TARGETS);
     }
   } catch (const Exception& e) {
     if (!prefetch) {
@@ -215,7 +215,7 @@ std::shared_ptr<Uptane::Targets> ImageRepository::verifyDelegation(const std::st
 
 void ImageRepository::checkTargetsExpired() {
   if (targets->isExpired(Now())) {
-    throw Uptane::ExpiredMetadata(type.ToString(), Role::TARGETS);
+    throw Uptane::ExpiredMetadata(type, Role::TARGETS);
   }
 }
 
@@ -244,7 +244,7 @@ void ImageRepository::updateMeta(INvStorage& storage, const IMetadataFetcher& fe
     verifyTimestamp(image_timestamp);
 
     if (local_version > remote_version) {
-      throw Uptane::SecurityException(RepositoryType::IMAGE, "Rollback attempt");
+      throw Uptane::SecurityException(RepositoryType::Image(), "Rollback attempt");
     } else if (local_version < remote_version || timestamp_stored_signature != timestamp.signature()) {
       // If local and remote versions are the same but their content actually differ then store/update the metadata in
       // DB We assume that the metadata contains just one signature, otherwise the comparison might not always work
@@ -320,13 +320,13 @@ void ImageRepository::checkMetaOffline(INvStorage& storage) {
   {
     std::string image_root;
     if (!storage.loadLatestRoot(&image_root, RepositoryType::Image())) {
-      throw Uptane::SecurityException(RepositoryType::IMAGE, "Could not load latest root");
+      throw Uptane::SecurityException(RepositoryType::Image(), "Could not load latest root");
     }
 
-    initRoot(RepositoryType(RepositoryType::IMAGE), image_root);
+    initRoot(RepositoryType::Image(), image_root);
 
     if (rootExpired()) {
-      throw Uptane::ExpiredMetadata(RepositoryType::IMAGE, Role::Root().ToString());
+      throw Uptane::ExpiredMetadata(RepositoryType::Image(), Role::Root().ToString());
     }
   }
 
@@ -334,7 +334,7 @@ void ImageRepository::checkMetaOffline(INvStorage& storage) {
   {
     std::string image_timestamp;
     if (!storage.loadNonRoot(&image_timestamp, RepositoryType::Image(), Role::Timestamp())) {
-      throw Uptane::SecurityException(RepositoryType::IMAGE, "Could not load Timestamp role");
+      throw Uptane::SecurityException(RepositoryType::Image(), "Could not load Timestamp role");
     }
 
     verifyTimestamp(image_timestamp);
@@ -347,7 +347,7 @@ void ImageRepository::checkMetaOffline(INvStorage& storage) {
     std::string image_snapshot;
 
     if (!storage.loadNonRoot(&image_snapshot, RepositoryType::Image(), Role::Snapshot())) {
-      throw Uptane::SecurityException(RepositoryType::IMAGE, "Could not load Snapshot role");
+      throw Uptane::SecurityException(RepositoryType::Image(), "Could not load Snapshot role");
     }
 
     verifySnapshot(image_snapshot, false);
@@ -360,7 +360,7 @@ void ImageRepository::checkMetaOffline(INvStorage& storage) {
     std::string image_targets;
     Role targets_role = Uptane::Role::Targets();
     if (!storage.loadNonRoot(&image_targets, RepositoryType::Image(), targets_role)) {
-      throw Uptane::SecurityException(RepositoryType::IMAGE, "Could not load Image role");
+      throw Uptane::SecurityException(RepositoryType::Image(), "Could not load Image role");
     }
 
     verifyTargets(image_targets, false);
@@ -376,19 +376,19 @@ void ImageRepository::checkMetaOfflineOffUpd(INvStorage& storage) {
   // Load Image repo Root Metadata
   std::string image_root;
   if (!storage.loadLatestRoot(&image_root, RepositoryType::Image())) {
-    throw Uptane::SecurityException(RepositoryType::IMAGE, "Could not load latest root");
+    throw Uptane::SecurityException(RepositoryType::Image(), "Could not load latest root");
   }
 
-  initRoot(RepositoryType(RepositoryType::IMAGE), image_root);
+  initRoot(RepositoryType(RepositoryType::Image()), image_root);
 
   if (rootExpired()) {
-    throw Uptane::ExpiredMetadata(RepositoryType::IMAGE, Role::Root().ToString());
+    throw Uptane::ExpiredMetadata(RepositoryType::Image(), Role::Root().ToString());
   }
 
   // Load Image repo Snapshot Metadata
   std::string image_snapshot;
   if (!storage.loadNonRoot(&image_snapshot, RepositoryType::Image(), Role::Snapshot())) {
-    throw Uptane::SecurityException(RepositoryType::IMAGE, "Could not load Snapshot role");
+    throw Uptane::SecurityException(RepositoryType::Image(), "Could not load Snapshot role");
   }
 
   verifySnapshotOffline(image_snapshot);
@@ -398,7 +398,7 @@ void ImageRepository::checkMetaOfflineOffUpd(INvStorage& storage) {
   // Load Image repo Targets Metadata
   std::string image_targets;
   if (!storage.loadNonRoot(&image_targets, RepositoryType::Image(), Role::Targets())) {
-    throw Uptane::SecurityException(RepositoryType::IMAGE, "Could not load Targets role");
+    throw Uptane::SecurityException(RepositoryType::Image(), "Could not load Targets role");
   }
 
   verifyTargets(image_targets, false);

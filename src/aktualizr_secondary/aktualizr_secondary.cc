@@ -324,7 +324,6 @@ AktualizrSecondary::ReturnCode AktualizrSecondary::getRootVerHdlr(Asn1Message& i
     repo_type = Uptane::RepositoryType::Image();
   } else {
     LOG_WARNING << "Received Root version request with invalid repo type: " << rv->repotype;
-    repo_type = Uptane::RepositoryType(-1);
   }
 
   int32_t root_version = -1;
@@ -349,8 +348,6 @@ AktualizrSecondary::ReturnCode AktualizrSecondary::putRootHdlr(Asn1Message& in_m
     repo_type = Uptane::RepositoryType::Director();
   } else if (pr->repotype == AKRepoType_image) {
     repo_type = Uptane::RepositoryType::Image();
-  } else {
-    repo_type = Uptane::RepositoryType(-1);
   }
 
   const std::string json = ToString(pr->json);
