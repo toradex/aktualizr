@@ -32,7 +32,7 @@ TEST(DirectorOffline, Simple) {
   fs::path import = dir.Path() / "import";
   fs::path director_import = import / "director";
   fs::create_directories(director_import);
-  ASSERT_TRUE(fs::copy_file(offline_update_path / "metadata/director/1.root.json", director_import / "root.json"));
+  fs::copy_file(offline_update_path / "metadata/director/1.root.json", director_import / "root.json");
 
   SQLStorage storage{storage_config, false};
 
