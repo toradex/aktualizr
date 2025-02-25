@@ -5,9 +5,11 @@
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
 
+#include "libaktualizr/config.h"
 #include "libaktualizr/packagemanagerfactory.h"
 
 #include "aktualizr_info_config.h"
+#include "dbus_client.h"
 #include "logging/logging.h"
 #include "storage/invstorage.h"
 #include "storage/sql_utils.h"
@@ -74,7 +76,8 @@ int main(int argc, char **argv) {
     ("director-targets",  "Outputs targets.json from Director repo")
     ("root-version",  bpo::value<int>(), "Use with --image-root or --director-root to specify the version to output")
     ("allow-migrate", "Opens database in read/write mode to make possible to migrate database if needed")
-    ("wait-until-provisioned", "Outputs metadata when device already provisioned");
+    ("wait-until-provisioned", "Outputs metadata when device already provisioned")
+    ("shoulder-tap", "Ask Aktualizr service to poll for updates over DBus");
   // Support old names and variations due to common typos.
   hidden.add_options()
     ("images-root",  "Outputs root.json from Image repo")
@@ -101,7 +104,19 @@ int main(int argc, char **argv) {
     }
 
     logger_init();
+
+    if (vm.count("shoulder-tap") != 0U) {
+      LoggerConfig logger_config;
+      if (vm.count("loglevel") != 0) {
+        logger_config.loglevel = vm["loglevel"].as<int>();
+      }
+      logger_set_threshold(logger_config);
+      int result_code = aktualizr_dbus_client_shoulder_tap();
+      return result_code;
+    }
+
     if (vm.count("loglevel") == 0U) {
+      // Note: Do this after handling --shoulder-tap
       logger_set_enable(false);
     }
 

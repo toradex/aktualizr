@@ -25,6 +25,11 @@ if(BUILD_GENERIC_SECONDARY)
     target_link_libraries(aktualizr torizon_generic_secondary)
 endif()
 
+if(BUILD_DBUS)
+    target_compile_definitions(aktualizr PRIVATE BUILD_DBUS)
+    target_link_libraries(aktualizr ${SYSTEMD_LIBRARIES})
+endif(BUILD_DBUS)
+
 install(TARGETS aktualizr RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT aktualizr)
 
 add_aktualizr_test(NAME primary_secondary_registration
