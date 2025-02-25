@@ -2,6 +2,7 @@
 #include <chrono>
 #include <fstream>
 #include <future>
+#include <memory>
 
 #include <sodium.h>
 
@@ -14,6 +15,10 @@
 #include "primary/update_lock_file.h"
 #include "utilities/apiqueue.h"
 #include "utilities/timer.h"
+
+#ifdef BUILD_DBUS
+#include "primary/dbus.h"
+#endif
 
 namespace fs = boost::filesystem;  // NOLINT Used when building for offline updates
 
@@ -233,6 +238,12 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
           }
           auto next_wake_up = std::min(next_offline_poll_, next_online_poll_);
           exit_cond_.cv.wait_until(guard, next_wake_up);
+          // Got a shoulder tap from Aktualizr::ShoulderTap
+          if (exit_cond_.had_shoulder_tap) {
+            LOG_INFO << "Shoulder tap woke Aktualizr thread";
+            exit_cond_.had_shoulder_tap = false;
+            next_online_poll_ = now;
+          }
         }
         break;
       case UpdateCycleState::kSendingManifest:
@@ -535,6 +546,22 @@ Aktualizr::InstallationLog Aktualizr::GetInstallationLog() {
 
   return ilog;
 }
+
+#ifdef BUILD_DBUS
+
+void Aktualizr::SetDbusInterface(SdBus &&bus) {
+  auto dbus_adaptor = std::make_unique<Dbus>(std::move(bus));
+
+  dbus_adaptor->SetShoulderTapCallback([this] {
+    LOG_WARNING << "Got shoulder tap from D-Bus";
+    std::lock_guard<std::mutex> lock{exit_cond_.m};
+    exit_cond_.had_shoulder_tap = true;
+    exit_cond_.cv.notify_all();
+  });
+  consent_ = std::move(dbus_adaptor);
+}
+
+#endif
 
 std::vector<Uptane::Target> Aktualizr::GetStoredTargets() { return uptane_client_->getStoredTargets(); }
 

@@ -61,6 +61,11 @@ add_aktualizr_test(NAME secondary_rpc
                    SOURCES secondary_rpc_test.cc $<TARGET_OBJECTS:bootstrap> $<TARGET_OBJECTS:campaign> $<TARGET_OBJECTS:http> $<TARGET_OBJECTS:primary> $<TARGET_OBJECTS:primary_config>
                    PROJECT_WORKING_DIRECTORY)
 
+# The secondary_rpc test above does some fruity things with the linker, so it needs to be told about sd-bus
+if(BUILD_DBUS)
+    target_link_libraries(t_secondary_rpc ${SYSTEMD_LIBRARIES})
+endif(BUILD_DBUS)
+
 list(REMOVE_ITEM TEST_SOURCES $<TARGET_OBJECTS:bootstrap> $<TARGET_OBJECTS:campaign> $<TARGET_OBJECTS:http> $<TARGET_OBJECTS:primary> $<TARGET_OBJECTS:primary_config>)
 
 if(BUILD_OSTREE)

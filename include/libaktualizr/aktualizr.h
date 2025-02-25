@@ -14,6 +14,7 @@
 
 class SotaUptaneClient;
 class INvStorage;
+class SdBus;
 
 namespace api {
 class CommandQueue;
@@ -386,7 +387,14 @@ class Aktualizr {
    * installing an update. The default is 'TrivialConsent' which automatically
    * approves all updates.
    */
-  void SetConsent(std::shared_ptr<Consent> consent) { consent_ = std::move(consent); }
+  void SetConsent(std::unique_ptr<Consent> consent) { consent_ = std::move(consent); }
+
+  /**
+   * Configure the D-Bus interface to listen to.
+   * In order to simplfy testing, this does not attempt to acquire a well-known
+   * name. The next level up should do that.
+   */
+  void SetDbusInterface(SdBus&& bus);
 
  protected:
   Aktualizr(Config config, std::shared_ptr<INvStorage> storage_in, const std::shared_ptr<HttpInterface>& http_in);
@@ -485,6 +493,7 @@ class Aktualizr {
       std::lock_guard<std::mutex> const guard{m};
       return run_mode;
     }
+    bool had_shoulder_tap{false};
   } exit_cond_;
 
   std::shared_ptr<INvStorage> storage_;
@@ -492,7 +501,7 @@ class Aktualizr {
   std::unique_ptr<api::CommandQueue> api_queue_;
 
   UpdateLockFile update_lock_file_;
-  std::shared_ptr<Consent> consent_{std::make_shared<TrivialConsent>()};
+  std::unique_ptr<Consent> consent_{std::make_unique<TrivialConsent>()};
 };
 
 #endif  // AKTUALIZR_H_

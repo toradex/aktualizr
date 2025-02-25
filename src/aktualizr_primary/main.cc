@@ -9,6 +9,7 @@
 #include "libaktualizr/config.h"
 #include "logging/logging.h"
 #include "primary/aktualizr_helpers.h"
+#include "primary/dbus.h"
 #include "secondary.h"
 #include "utilities/aktualizr_version.h"
 #include "utilities/sig_handler.h"
@@ -16,6 +17,10 @@
 #ifdef TORIZON
 #include "device_data_proxy.h"
 #include "update_events.h"
+#endif
+
+#ifdef BUILD_DBUS
+#include <systemd/sd-bus.h>
 #endif
 
 #ifdef TORIZON
@@ -247,6 +252,24 @@ int main(int argc, char *argv[]) {
     } else if (run_mode == "once") {
       aktualizr.UptaneCycle();
     } else {
+#ifdef BUILD_DBUS
+      SdBus bus;
+      int err = sd_bus_default_system(&bus.ptr);
+      if (err < 0) {
+        LOG_WARNING << "Failed to open system D-Bus err:" << err;
+      } else {
+        err =
+            sd_bus_request_name(bus.ptr, Dbus::WellKnown, SD_BUS_NAME_ALLOW_REPLACEMENT | SD_BUS_NAME_REPLACE_EXISTING);
+        if (err < 0) {
+          LOG_WARNING << "Failed to acquire D-Bus well-known name of " << Dbus::WellKnown << " err:" << err;
+        } else {
+          LOG_INFO << "Registering with D-Bus";
+          aktualizr.SetDbusInterface(std::move(bus));
+        }
+      }
+#else
+      LOG_INFO << "Not registering with D-Bus because support was not compiled in";
+#endif
       boost::signals2::connection ac_conn =
           aktualizr.SetSignalHandler(std::bind(targets_autoclean_cb, std::ref(aktualizr), std::placeholders::_1));
 

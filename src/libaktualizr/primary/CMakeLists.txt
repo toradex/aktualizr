@@ -9,6 +9,7 @@ set(SOURCES aktualizr.cc
 
 set(HEADERS aktualizr_helpers.h
             consent.h
+            dbus.h
             provisioner.h
             reportqueue.h
             secondary_config.h
@@ -17,7 +18,23 @@ set(HEADERS aktualizr_helpers.h
             sotauptaneclient.h
             update_lock_file.h)
 
+
+if (BUILD_DBUS)
+    list(APPEND SOURCES dbus.cc)
+    # The version of systemd in Debian 11 defines SD_BUS_VTABLE_END in a way that triggers
+    # missing initializer for member ‘sd_bus_vtable::<unnamed union>::<unnamed struct>::features
+    # Disable this warning for this file
+    set_source_files_properties(dbus.cc COMPILE_FLAGS -Wno-missing-field-initializers)
+else (BUILD_DBUS)
+    aktualizr_source_file_checks(dbus.cc)
+endif(BUILD_DBUS)
+
+
 add_library(primary OBJECT ${SOURCES})
+if (BUILD_DBUS)
+    target_compile_definitions(primary PRIVATE BUILD_DBUS)
+    target_link_libraries(primary PUBLIC ${SYSTEMD_LIBRARIES})
+endif(BUILD_DBUS)
 
 add_library(provisioner_test_utils STATIC provisioner_test_utils.cc)
 aktualizr_source_file_checks(provisioner_test_utils.cc provisioner_test_utils.h)
@@ -126,5 +143,15 @@ add_aktualizr_test(NAME aktualizr_update_lock
                    PROJECT_WORKING_DIRECTORY
                    ARGS "$<TARGET_FILE:uptane-generator>"
                    LIBRARIES uptane_generator_lib virtual_secondary)
+
+if (BUILD_DBUS)
+    add_aktualizr_test(NAME aktualizr_dbus
+                       SOURCES aktualizr_dbus_test.cc
+                       PROJECT_WORKING_DIRECTORY
+                       ARGS ${PROJECT_BINARY_DIR}/uptane_repos
+                       LIBRARIES uptane_generator_lib virtual_secondary ${SYSTEMD_LIBRARIES})
+else(BUILD_DBUS)
+    aktualizr_source_file_checks(aktualizr_dbus_test.cc)
+endif(BUILD_DBUS)
 
 aktualizr_source_file_checks(${SOURCES} ${HEADERS} ${TEST_SOURCES})
