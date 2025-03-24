@@ -387,7 +387,8 @@ set (AKTUALIZR_EXTERNAL_LIBS
     ${SQLITE3_LIBRARIES}
     ${LibArchive_LIBRARIES}
     ${LIBP11_LIBRARIES}
-    ${GLIB2_LIBRARIES})
+    ${GLIB2_LIBRARIES}
+    ${SYSTEMD_LIBRARIES})
 
 get_directory_property(hasParent PARENT_DIRECTORY)
 if(hasParent)

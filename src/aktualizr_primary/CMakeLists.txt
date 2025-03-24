@@ -27,7 +27,6 @@ endif()
 
 if(BUILD_DBUS)
     target_compile_definitions(aktualizr PRIVATE BUILD_DBUS)
-    target_link_libraries(aktualizr ${SYSTEMD_LIBRARIES})
 endif(BUILD_DBUS)
 
 install(TARGETS aktualizr RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT aktualizr)

@@ -33,7 +33,6 @@ endif(BUILD_DBUS)
 add_library(primary OBJECT ${SOURCES})
 if (BUILD_DBUS)
     target_compile_definitions(primary PRIVATE BUILD_DBUS)
-    target_link_libraries(primary PUBLIC ${SYSTEMD_LIBRARIES})
 endif(BUILD_DBUS)
 
 add_library(provisioner_test_utils STATIC provisioner_test_utils.cc)
@@ -149,7 +148,7 @@ if (BUILD_DBUS)
                        SOURCES aktualizr_dbus_test.cc
                        PROJECT_WORKING_DIRECTORY
                        ARGS ${PROJECT_BINARY_DIR}/uptane_repos
-                       LIBRARIES uptane_generator_lib virtual_secondary ${SYSTEMD_LIBRARIES})
+                       LIBRARIES uptane_generator_lib virtual_secondary)
 else(BUILD_DBUS)
     aktualizr_source_file_checks(aktualizr_dbus_test.cc)
 endif(BUILD_DBUS)

@@ -6,7 +6,6 @@ add_executable(aktualizr-info ${AKTUALIZR_INFO_SRC})
 
 if (BUILD_DBUS)
          target_compile_definitions(aktualizr-info PRIVATE BUILD_DBUS)
-         target_link_libraries(aktualizr-info ${SYSTEMD_LIBRARIES})
 endif(BUILD_DBUS)
 
 target_link_libraries(aktualizr-info aktualizr_lib)
