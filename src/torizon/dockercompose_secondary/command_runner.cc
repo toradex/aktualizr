@@ -16,6 +16,9 @@ bool CommandRunner::run(const std::string& cmd, const api::FlowControlToken* flo
     return false;
   }
 
+  // This is unsafe according to
+  // https://github.com/boostorg/process/issues/347
+  // TODO: Switch to the new v2 API once we EOL Debian Bullseye support
   while (!child_process.wait_for(std::chrono::milliseconds(100))) {
     if (flow_control != nullptr && flow_control->hasAborted()) {
       LOG_INFO << "Killing child process due to flow_control abort";
