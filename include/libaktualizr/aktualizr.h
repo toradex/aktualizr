@@ -9,10 +9,12 @@
 #include "libaktualizr/config.h"
 #include "libaktualizr/events.h"
 #include "libaktualizr/secondaryinterface.h"
+#include "primary/consent.h"
 #include "primary/update_lock_file.h"
 
 class SotaUptaneClient;
 class INvStorage;
+class SdBus;
 
 namespace api {
 class CommandQueue;
@@ -380,6 +382,20 @@ class Aktualizr {
    */
   boost::signals2::connection SetSignalHandler(const SigHandler& handler);
 
+  /**
+   * Configure a Consent plugin, which allows checking with the user before
+   * installing an update. The default is 'TrivialConsent' which automatically
+   * approves all updates.
+   */
+  void SetConsent(std::unique_ptr<Consent> consent) { consent_ = std::move(consent); }
+
+  /**
+   * Configure the D-Bus interface to listen to.
+   * In order to simplfy testing, this does not attempt to acquire a well-known
+   * name. The next level up should do that.
+   */
+  void SetDbusInterface(SdBus&& bus);
+
  protected:
   Aktualizr(Config config, std::shared_ptr<INvStorage> storage_in, const std::shared_ptr<HttpInterface>& http_in);
 
@@ -400,6 +416,8 @@ class Aktualizr {
     kSendingManifest,
     /** We started checking for updates, and are waiting for it to complete. */
     kCheckingForUpdates,
+    /** We are waiting for user consent to install an update */
+    kGetConsent,
     /** We are downloading an update, and are waiting for it to complete.*/
     kDownloading,
     /** We are installing an update, and are waiting for it to complete. */
@@ -439,12 +457,14 @@ class Aktualizr {
   std::future<void> op_void_;
   std::future<bool> op_bool_;
   std::future<result::UpdateCheck> op_update_check_;
+  std::future<Consent::Outcome> op_consent_;
   std::future<result::Download> op_download_;
   std::future<result::Install> op_install_;
 
   using Clock = std::chrono::steady_clock;
   Clock::time_point next_online_poll_;
   Clock::time_point next_offline_poll_;
+  result::UpdateCheck update_result_{};
   // Make sure this is declared before SotaUptaneClient to prevent Valgrind
   // complaints with destructors.
   Config config_;
@@ -473,6 +493,7 @@ class Aktualizr {
       std::lock_guard<std::mutex> const guard{m};
       return run_mode;
     }
+    bool had_shoulder_tap{false};
   } exit_cond_;
 
   std::shared_ptr<INvStorage> storage_;
@@ -480,6 +501,7 @@ class Aktualizr {
   std::unique_ptr<api::CommandQueue> api_queue_;
 
   UpdateLockFile update_lock_file_;
+  std::unique_ptr<Consent> consent_{std::make_unique<TrivialConsent>()};
 };
 
 #endif  // AKTUALIZR_H_

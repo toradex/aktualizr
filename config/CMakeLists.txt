@@ -17,4 +17,10 @@ if(BUILD_DEB)
         COMPONENT aktualizr)
 endif(BUILD_DEB)
 
+if(BUILD_DBUS)
+    install(FILES dbus/aktualizr.conf
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/dbus-1/system.d
+        COMPONENT aktualizr)
+endif(BUILD_DBUS)
+
 install(DIRECTORY DESTINATION ${CMAKE_INSTALL_LIBDIR}/sota/conf.d COMPONENT aktualizr)

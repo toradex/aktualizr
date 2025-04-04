@@ -119,6 +119,7 @@ const std::map<data::ResultCode::Numeric, const char *> data::ResultCode::string
     {ResultCode::Numeric::kNeedCompletion, "NEED_COMPLETION"},
     {ResultCode::Numeric::kCustomError, "CUSTOM_ERROR"},
     {ResultCode::Numeric::kOperationCancelled, "OPERATION_CANCELLED"},
+    {ResultCode::Numeric::kConsentRefused, "CONSENT_REFUSED"},
     {ResultCode::Numeric::kUnknown, "UNKNOWN"},
 };
 

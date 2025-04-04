@@ -277,6 +277,16 @@ TEST(ReportQueue, PayloadTooLarge) {
   }
 }
 
+TEST(ReportQueue, ConsentOutcomeSerialization) {
+  auto report = ConsentOutcomeReport("cid1", true, "LGTM");
+  EXPECT_EQ(report.toJson()["event"], Utils::parseJSON(R"(
+	{
+		"correlationId" : "cid1",
+		"granted" : true,
+		"reason" : "LGTM"
+	})"));
+}
+
 #ifndef __NO_MAIN__
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);

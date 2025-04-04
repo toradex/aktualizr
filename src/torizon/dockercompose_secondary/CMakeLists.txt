@@ -1,6 +1,13 @@
 set(SOURCES command_runner.cc compose_manager.cc
     dockercomposesecondary.cc dockerofflineloader.cc dockertarballloader.cc)
 
+# Recent versions of Boost (e.g. v1.87) deprecated boost::process::v1::child::wait_for since it is
+# unreliable. However the new v2 API isn;t available in the 1.74 version we support in Debian
+# oldstable. For now disable the warning
+# https://www.boost.org/doc/libs/1_74_0/doc/html/process.html
+#
+set_source_files_properties(command_runner.cc PROPERTIES COMPILE_FLAGS "-Wno-deprecated-declarations")
+
 set(HEADERS command_runner.h compose_manager.h
     dockercomposesecondary.h dockerofflineloader.h dockertarballloader.h)
 

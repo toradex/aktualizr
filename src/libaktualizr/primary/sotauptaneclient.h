@@ -22,6 +22,7 @@
 
 #include "bootloader/bootloader.h"
 #include "http/httpclient.h"
+#include "primary/consent.h"
 #include "primary/secondary_provider_builder.h"
 #include "provisioner.h"
 #include "reportqueue.h"
@@ -76,6 +77,8 @@ class SotaUptaneClient {
   void setCustomHardwareInfo(Json::Value hwinfo) { custom_hardware_info_ = std::move(hwinfo); }
   void reportPause();
   void reportResume();
+  void reportAwaitingConsent();
+  void reportConsentOutcome(const Consent::Outcome &consent_outcome);
   void sendDeviceData();
   result::UpdateCheck fetchMeta();
   bool putManifest(const Json::Value &custom = Json::nullValue);

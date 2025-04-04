@@ -1,21 +1,26 @@
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <fstream>
+#include <future>
+#include <memory>
 
 #include <sodium.h>
 
+#include "json/json.h"
 #include "libaktualizr/aktualizr.h"
 #include "libaktualizr/events.h"
+#include "logging/logging.h"
+#include "primary/consent.h"
 #include "primary/sotauptaneclient.h"
 #include "primary/update_lock_file.h"
 #include "utilities/apiqueue.h"
 #include "utilities/timer.h"
 
-using std::make_shared;
-using std::move;
-using std::shared_ptr;
+#ifdef BUILD_DBUS
+#include "primary/dbus.h"
+#endif
 
-namespace bf = boost::filesystem;
+namespace fs = boost::filesystem;  // NOLINT Used when building for offline updates
 
 Aktualizr::Aktualizr(const Config &config)
     : Aktualizr(config, INvStorage::newStorage(config.storage), std::make_shared<HttpClient>()) {}
@@ -87,6 +92,9 @@ std::ostream &operator<<(std::ostream &os, Aktualizr::UpdateCycleState state) {
     case Aktualizr::UpdateCycleState::kCheckingForUpdates:
       os << "CheckingForUpdates";
       break;
+    case Aktualizr::UpdateCycleState::kGetConsent:
+      os << "GetConsent";
+      break;
     case Aktualizr::UpdateCycleState::kDownloading:
       os << "Downloading";
       break;
@@ -150,10 +158,14 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
         case UpdateCycleState::kIdle:
         case UpdateCycleState::kSendingManifest:
         case UpdateCycleState::kCheckingForUpdates:
+        case UpdateCycleState::kGetConsent:
         case UpdateCycleState::kDownloading:
         case UpdateCycleState::kInstalling:
           // In these cases we need to poll for Offline updates
           if (OfflineUpdateAvailable()) {
+            if (state_ == UpdateCycleState::kGetConsent) {
+              consent_->PendingUpdateCancelled();
+            }
             api_queue_->abort();
             // TODO: How can we send an 'update failed' the next time we have idle network
             op_update_check_ = CheckUpdatesOffline(config_.uptane.offline_updates_source);
@@ -226,6 +238,12 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
           }
           auto next_wake_up = std::min(next_offline_poll_, next_online_poll_);
           exit_cond_.cv.wait_until(guard, next_wake_up);
+          // Got a shoulder tap from Aktualizr::ShoulderTap
+          if (exit_cond_.had_shoulder_tap) {
+            LOG_INFO << "Shoulder tap woke Aktualizr thread";
+            exit_cond_.had_shoulder_tap = false;
+            next_online_poll_ = now;
+          }
         }
         break;
       case UpdateCycleState::kSendingManifest:
@@ -243,14 +261,14 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
         break;
       case UpdateCycleState::kCheckingForUpdates:
         if (op_update_check_.wait_until(next_offline_poll_) == std::future_status::ready) {
-          result::UpdateCheck const update_result = op_update_check_.get();
+          update_result_ = op_update_check_.get();
           if (update_lock_file_.ShouldUpdate() == UpdateLockFile::kNoUpdate) {
             next_online_poll_ = now + std::chrono::seconds(config_.uptane.polling_sec);
             state_ = UpdateCycleState::kIdle;
             break;
           }
-          if (update_result.updates.empty()) {
-            if (update_result.status == result::UpdateStatus::kError) {
+          if (update_result_.updates.empty()) {
+            if (update_result_.status == result::UpdateStatus::kError) {
               op_bool_ = SendManifest();
               state_ = UpdateCycleState::kSendingManifest;
               break;
@@ -260,8 +278,22 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
             break;
           }
           // Got an update
-          op_download_ = Download(update_result.updates);
-          state_ = UpdateCycleState::kDownloading;
+          op_consent_ = consent_->GetConsent(update_result_.updates);
+          uptane_client_->reportAwaitingConsent();
+          state_ = UpdateCycleState::kGetConsent;
+        }
+        break;
+      case UpdateCycleState::kGetConsent:
+        if (op_consent_.wait_until(next_offline_poll_) == std::future_status::ready) {
+          auto consent = op_consent_.get();
+          // uptane_client_->reportConsentOutcome(consent);
+          if (consent.granted) {
+            op_download_ = Download(update_result_.updates);
+            state_ = UpdateCycleState::kDownloading;
+          } else {
+            LOG_WARNING << "User refused consent of update :" << consent.reason;
+            state_ = UpdateCycleState::kIdle;
+          }
         }
         break;
       case UpdateCycleState::kDownloading:
@@ -301,18 +333,18 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
         break;
 #ifdef BUILD_OFFLINE_UPDATES
       case UpdateCycleState::kCheckingForUpdatesOffline: {
-        result::UpdateCheck const update_result = op_update_check_.get();  // No need to timeout
-        if (update_result.updates.empty() || update_lock_file_.ShouldUpdate() == UpdateLockFile::kNoUpdate) {
+        update_result_ = op_update_check_.get();  // No need to timeout
+        if (update_result_.updates.empty() || update_lock_file_.ShouldUpdate() == UpdateLockFile::kNoUpdate) {
           next_online_poll_ = now + std::chrono::seconds(config_.uptane.polling_sec);
           state_ = UpdateCycleState::kIdle;
           break;
         }
-        if (update_result.status == result::UpdateStatus::kError) {
+        if (update_result_.status == result::UpdateStatus::kError) {
           op_bool_ = SendManifest();
           state_ = UpdateCycleState::kSendingManifest;
           break;
         }
-        op_download_ = Download(update_result.updates, UpdateType::kOffline);
+        op_download_ = Download(update_result_.updates, UpdateType::kOffline);
         state_ = UpdateCycleState::kFetchingImagesOffline;
         break;
       }
@@ -489,7 +521,7 @@ result::Pause Aktualizr::Resume() {
 void Aktualizr::Abort() { api_queue_->abort(); }
 
 boost::signals2::connection Aktualizr::SetSignalHandler(
-    const std::function<void(shared_ptr<event::BaseEvent>)> &handler) {
+    const std::function<void(std::shared_ptr<event::BaseEvent>)> &handler) {
   return sig_->connect(handler);
 }
 
@@ -515,6 +547,22 @@ Aktualizr::InstallationLog Aktualizr::GetInstallationLog() {
   return ilog;
 }
 
+#ifdef BUILD_DBUS
+
+void Aktualizr::SetDbusInterface(SdBus &&bus) {
+  auto dbus_adaptor = std::make_unique<Dbus>(std::move(bus));
+
+  dbus_adaptor->SetShoulderTapCallback([this] {
+    LOG_WARNING << "Got shoulder tap from D-Bus";
+    std::lock_guard<std::mutex> lock{exit_cond_.m};
+    exit_cond_.had_shoulder_tap = true;
+    exit_cond_.cv.notify_all();
+  });
+  consent_ = std::move(dbus_adaptor);
+}
+
+#endif
+
 std::vector<Uptane::Target> Aktualizr::GetStoredTargets() { return uptane_client_->getStoredTargets(); }
 
 void Aktualizr::DeleteStoredTarget(const Uptane::Target &target) { uptane_client_->deleteStoredTarget(target); }
@@ -531,8 +579,8 @@ bool Aktualizr::OfflineUpdateAvailable() {
   OffUpdSourceState cur_state = OffUpdSourceState::Unknown;
 
   boost::system::error_code ec;
-  if (bf::exists(config_.uptane.offline_updates_source, ec)) {
-    if (bf::is_directory(config_.uptane.offline_updates_source / update_subdir, ec)) {
+  if (fs::exists(config_.uptane.offline_updates_source, ec)) {
+    if (fs::is_directory(config_.uptane.offline_updates_source / update_subdir, ec)) {
       cur_state = OffUpdSourceState::SourceExists;
     } else {
       cur_state = OffUpdSourceState::SourceExistsNoContent;
@@ -547,7 +595,7 @@ bool Aktualizr::OfflineUpdateAvailable() {
   return (old_state == OffUpdSourceState::SourceDoesNotExist && cur_state == OffUpdSourceState::SourceExists);
 }
 
-std::future<result::UpdateCheck> Aktualizr::CheckUpdatesOffline(const boost::filesystem::path &source_path) {
+std::future<result::UpdateCheck> Aktualizr::CheckUpdatesOffline(const fs::path &source_path) {
   std::function<result::UpdateCheck()> task(
       [this, source_path] { return uptane_client_->fetchMetaOffUpd(source_path); });
   return api_queue_->enqueue(std::move(task));
