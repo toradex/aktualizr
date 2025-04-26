@@ -161,6 +161,7 @@ class Aktualizr {
   /**
    * Download targets.
    * @param updates Vector of targets to download as provided by CheckUpdates.
+   * @param update_type Online vs offline updates, default to Online
    * @return std::future object with information about download results.
    *
    * @throw SQLException
@@ -168,7 +169,8 @@ class Aktualizr {
    * @throw std::system_error (failure to lock a mutex)
    * @throw SotaUptaneClient::NotProvisionedYet (called before provisioning complete)
    */
-  std::future<result::Download> Download(const std::vector<Uptane::Target>& updates, UpdateType = UpdateType::kOnline);
+  std::future<result::Download> Download(const std::vector<Uptane::Target>& updates,
+                                         UpdateType update_type = UpdateType::kOnline);
 
   struct InstallationLogEntry {
     Uptane::EcuSerial ecu;
@@ -227,6 +229,7 @@ class Aktualizr {
    * Install targets.
    * @param updates Vector of targets to install as provided by CheckUpdates or
    * Download.
+   * @param update_type Online vs offline updates, default to Online
    * @return std::future object with information about installation results.
    *
    * @throw SQLException
@@ -235,7 +238,8 @@ class Aktualizr {
    * @throw std::system_error (failure to lock a mutex)
    * @throw SotaUptaneClient::NotProvisionedYet (called before provisioning complete)
    */
-  std::future<result::Install> Install(const std::vector<Uptane::Target>& updates, UpdateType = UpdateType::kOnline);
+  std::future<result::Install> Install(const std::vector<Uptane::Target>& updates,
+                                       UpdateType update_type = UpdateType::kOnline);
 
 #ifdef BUILD_OFFLINE_UPDATES
   /**
@@ -485,11 +489,11 @@ class Aktualizr {
     kUntilRebootNeeded,  // Run 'forever' i.e. until a reboot is needed
     kStop,               // Stop the update cycle immediately
   };
-  struct {
+  struct ExitCond {
     std::mutex m;
     std::condition_variable cv;
-    RunMode run_mode = RunMode::kStop;
-    RunMode get() {
+    Aktualizr::RunMode run_mode{RunMode::kStop};
+    Aktualizr::RunMode get() {
       std::lock_guard<std::mutex> const guard{m};
       return run_mode;
     }
