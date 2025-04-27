@@ -12,7 +12,7 @@
 #include <iostream>
 
 const char *const Dbus::Path = "/org/uptane/aktualizr";
-const char *const Dbus::Interface = "org.uptane.aktualizr";
+const char *const Dbus::Interface = "org.uptane.Aktualizr";
 const char *const Dbus::WellKnown = Dbus::Interface;
 
 SdBus::SdBus(SdBus &&other) noexcept : ptr{other.ptr} { other.ptr = nullptr; }
