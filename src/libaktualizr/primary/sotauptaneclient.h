@@ -95,6 +95,7 @@ class SotaUptaneClient {
   void deleteStoredTarget(const Uptane::Target &target) { package_manager_->removeTargetFile(target); }
   std::ifstream openStoredTarget(const Uptane::Target &target);
   bool getEcuSerials(EcuSerials *serials) const { return provisioner_.GetEcuSerials(serials); }
+  void storeInstallationFailure(const data::InstallationResult &result);
 
 #ifdef BUILD_OFFLINE_UPDATES
   result::UpdateCheck fetchMetaOffUpd(const boost::filesystem::path &source_path);
@@ -180,7 +181,6 @@ class SotaUptaneClient {
   // Part of sendDeviceData()
   void reportAktualizrConfiguration();
   bool waitSecondariesReachable(const std::vector<Uptane::Target> &updates);
-  void storeInstallationFailure(const data::InstallationResult &result);
   data::InstallationResult rotateSecondaryRoot(Uptane::RepositoryType repo, SecondaryInterface &secondary,
                                                UpdateType utype);
   void sendMetadataToEcus(const std::vector<Uptane::Target> &targets, data::InstallationResult *result,

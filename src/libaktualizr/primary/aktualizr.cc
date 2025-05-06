@@ -9,6 +9,7 @@
 #include "json/json.h"
 #include "libaktualizr/aktualizr.h"
 #include "libaktualizr/events.h"
+#include "libaktualizr/types.h"
 #include "logging/logging.h"
 #include "primary/consent.h"
 #include "primary/sotauptaneclient.h"
@@ -238,10 +239,9 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
           }
           auto next_wake_up = std::min(next_offline_poll_, next_online_poll_);
           exit_cond_.cv.wait_until(guard, next_wake_up);
-          // Got a shoulder tap from Aktualizr::ShoulderTap
-          if (exit_cond_.had_shoulder_tap) {
-            LOG_INFO << "Shoulder tap woke Aktualizr thread";
-            exit_cond_.had_shoulder_tap = false;
+          if (exit_cond_.check_for_updates_now) {
+            LOG_INFO << "CheckForUpdates woke Aktualizr thread";
+            exit_cond_.check_for_updates_now = false;
             next_online_poll_ = now;
           }
         }
@@ -291,7 +291,10 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
             op_download_ = Download(update_result_.updates);
             state_ = UpdateCycleState::kDownloading;
           } else {
-            LOG_WARNING << "User refused consent of update :" << consent.reason;
+            LOG_WARNING << "User refused consent of update: " << consent.reason;
+            data::InstallationResult failure_result(data::ResultCode::Numeric::kConsentRefused, consent.reason);
+            StoreInstallationFailure(failure_result);
+            SendManifest();
             state_ = UpdateCycleState::kIdle;
           }
         }
@@ -491,6 +494,11 @@ std::future<result::Install> Aktualizr::Install(const std::vector<Uptane::Target
   return api_queue_->enqueue(std::move(task));
 }
 
+void Aktualizr::StoreInstallationFailure(data::InstallationResult result) {
+  std::function<void()> task([this, result] { return uptane_client_->storeInstallationFailure(result); });
+  api_queue_->enqueue(std::move(task));
+}
+
 bool Aktualizr::SetInstallationRawReport(const std::string &custom_raw_report) {
   return storage_->storeDeviceInstallationRawReport(custom_raw_report);
 }
@@ -550,12 +558,11 @@ Aktualizr::InstallationLog Aktualizr::GetInstallationLog() {
 #ifdef BUILD_DBUS
 
 void Aktualizr::SetDbusInterface(SdBus &&bus) {
-  auto dbus_adaptor = std::make_unique<Dbus>(std::move(bus));
+  auto dbus_adaptor = std::make_unique<Dbus>(std::move(bus), storage_);
 
-  dbus_adaptor->SetShoulderTapCallback([this] {
-    LOG_WARNING << "Got shoulder tap from D-Bus";
+  dbus_adaptor->SetCheckForUpdatesCallback([this] {
     std::lock_guard<std::mutex> lock{exit_cond_.m};
-    exit_cond_.had_shoulder_tap = true;
+    exit_cond_.check_for_updates_now = true;
     exit_cond_.cv.notify_all();
   });
   consent_ = std::move(dbus_adaptor);

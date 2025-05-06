@@ -21,8 +21,18 @@ class Consent {
 
   virtual ~Consent() = default;
 
+  /**
+   * Check if it is OK to install \p targets.
+   * When the user responds, the future will resolve.
+   * On the next call to either GetConsent or PendingUpdateCancelled, the future
+   * will be abandoned and .get() will throw std::future_errc::broken_promise,
+   */
   virtual std::future<Outcome> GetConsent(const std::vector<Uptane::Target>& targets) = 0;
 
+  /**
+   * Stop asking the user for Consent to install an update, perhaps to install
+   * an offline update instead.
+   */
   virtual void PendingUpdateCancelled() = 0;
 };
 

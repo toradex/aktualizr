@@ -27,7 +27,7 @@ option(BUILD_OFFLINE_UPDATES "Set to ON to compile with offline-updates support"
 option(BUILD_GENERIC_SECONDARY "Set to ON to enable generic secondary support" ON)
 option(BUILD_DEB "Set to ON to compile with debian packages support" OFF)
 option(BUILD_P11 "Support for key storage in a HSM via PKCS#11" OFF)
-option(BUILD_DBUS "Support consent and shoulder tap wake-ups over D-Bus (requires Systemd / sd-bus)" OFF)
+option(BUILD_DBUS "Support consent and wake-ups over D-Bus (requires Systemd / sd-bus)" OFF)
 option(BUILD_SOTA_TOOLS "Set to ON to build SOTA tools" OFF)
 option(FAULT_INJECTION "Set to ON to enable fault injection" OFF)
 option(TESTSUITE_VALGRIND "Set to ON to make tests to run under valgrind (default when CMAKE_BUILD_TYPE=Valgrind)" ${TESTSUITE_VALGRIND_DEFAULT})

@@ -9,6 +9,7 @@
 #include "libaktualizr/config.h"
 #include "libaktualizr/events.h"
 #include "libaktualizr/secondaryinterface.h"
+#include "libaktualizr/types.h"
 #include "primary/consent.h"
 #include "primary/update_lock_file.h"
 
@@ -456,6 +457,11 @@ class Aktualizr {
    */
   ExitReason RunUpdateLoop();
 
+  /**
+   * Record a installation failure in the manifest we send.
+   */
+  void StoreInstallationFailure(data::InstallationResult result);
+
   UpdateCycleState state_{UpdateCycleState::kUnprovisioned};
   // These hold a running operation for the current state
   std::future<void> op_void_;
@@ -497,7 +503,7 @@ class Aktualizr {
       std::lock_guard<std::mutex> const guard{m};
       return run_mode;
     }
-    bool had_shoulder_tap{false};
+    bool check_for_updates_now{false};
   } exit_cond_;
 
   std::shared_ptr<INvStorage> storage_;
