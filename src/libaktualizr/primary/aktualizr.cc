@@ -286,7 +286,7 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
       case UpdateCycleState::kGetConsent:
         if (op_consent_.wait_until(next_offline_poll_) == std::future_status::ready) {
           auto consent = op_consent_.get();
-          // uptane_client_->reportConsentOutcome(consent);
+          uptane_client_->reportConsentOutcome(consent);
           if (consent.granted) {
             op_download_ = Download(update_result_.updates);
             state_ = UpdateCycleState::kDownloading;
