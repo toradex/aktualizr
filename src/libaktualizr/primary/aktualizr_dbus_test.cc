@@ -42,7 +42,7 @@ boost::filesystem::path fake_meta_dir;     // NOLINT
  * development). This means that the DUT must not take a well-known name on the
  * bus, instead the client should find and connect to it using bus_name_. This
  * is critical to allow tests to run in parallel. This approach was chosen over
- * others (such as sparning a D-Bus daemon for each test) to keep the system
+ * others (such as spawning a D-Bus daemon for each test) to keep the system
  * simple and fast.
  */
 class AktualizrDbus : public testing::Test {
@@ -77,7 +77,7 @@ class AktualizrDbus : public testing::Test {
 /**
  * Trigger a check for updates from a D-Bus client and check it causes
  * \aktualizr to skip the polling interval. Correct operation is checked by
- * watching the Events that are emited through Aktualizr::SetSignalHandler().
+ * watching the Events that are emitted through Aktualizr::SetSignalHandler().
  */
 TEST_F(AktualizrDbus, CheckForUpdates) {
   auto http = std::make_shared<HttpFake>(temp_dir_.Path(), "noupdates", fake_meta_dir);
@@ -193,7 +193,7 @@ TEST_F(AktualizrDbus, ConsentRejected) {
                                 "PropertiesChanged", bus_signal_callback, &counter);
   ASSERT_GE(res, 0) << "Adding match signal failed:" << res;
 
-  // pump the system bus to wait for the Consent Property to changen
+  // pump the system bus to wait for the Consent Property to changed
   for (int i = 0; (counter == 0) && (i < 200); i++) {
     int messages = sd_bus_process(client_bus_, nullptr);
     ASSERT_GE(messages, 0) << "sd_bus_process got error" << -messages;
@@ -273,7 +273,7 @@ TEST_F(AktualizrDbus, DefaultIsNoConsent) {
   auto consent_response = dut.GetConsent(install_targets);
 
   using namespace std::chrono_literals;
-  ASSERT_EQ(consent_response.wait_for(1ms), std::future_status::ready) << "Consent result be immediate";
+  ASSERT_EQ(consent_response.wait_for(1ms), std::future_status::ready) << "Consent result should be immediate";
 
   EXPECT_TRUE(consent_response.get().granted) << "Consent should be granted by default";
 }

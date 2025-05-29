@@ -135,7 +135,7 @@ When working interactively with a device, this can be easier than running a shor
 
 ## Security Considerations
 
-The key security control is that the D-Bus API doesn’t add provide any new rights to install software.
+The key security control is that the D-Bus API doesn’t provide any new rights to install software.
 It is possible to indefinitely block the installation of updates, but this is an explicit right granted by the CRA.
 In the future it will be possible to trigger an offline update over D-Bus, but this will require that a suitable signed update package is already present on the device somewhere, which is equivalent power to being able to plug a USB drive into the device.
 
