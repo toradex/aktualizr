@@ -165,25 +165,6 @@ TEST_F(AktualizrDbus, ConsentRejected) {
 
   aktualizr.SetDbusInterface(std::move(dut_bus_));
 
-  /*
-  struct CheckEvents {
-    std::mutex m;
-    std::condition_variable cv;
-    int update_checks{0};
-
-    void HandleEvent(const std::shared_ptr<event::BaseEvent>& event) {
-      if (event->variant == "UpdateCheckComplete") {
-        std::lock_guard<std::mutex> guard{m};
-        update_checks++;
-        cv.notify_all();
-      }
-    }
-  };
-
-  CheckEvents check_events;
-  auto conn = aktualizr.SetSignalHandler(std::bind(&CheckEvents::HandleEvent, &check_events, std::placeholders::_1));
-  */
-
   aktualizr.Initialize();
   auto ak_future = aktualizr.RunForever();
 
@@ -226,6 +207,15 @@ TEST_F(AktualizrDbus, ConsentRejected) {
       << "The manifest should contain a failure";
   EXPECT_FALSE(installation_report["result"]["success"].asBool())
       << "The overall success of the installation should be a failure";
+
+  int found = 0;
+  for (const auto& event : http->report_events()) {
+    if (event == "ConsentOutcome") {
+      found++;
+    }
+  }
+
+  EXPECT_EQ(found, 1) << "Should have got a ConsentOutcomeEvent";
 
   aktualizr.Shutdown();
   ak_future.wait();
