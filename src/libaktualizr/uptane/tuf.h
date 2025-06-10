@@ -223,7 +223,6 @@ class MetaWithKeys : public BaseMeta {
    * @param repo - Repository type (only used to improve the error messages)
    * @param role - The Uptane role of the signed metadata object
    * @param signed_object
-   * @return
    */
   virtual void UnpackSignedObject(RepositoryType repo, const Role &role, const Json::Value &signed_object);
 
@@ -272,7 +271,6 @@ class Root : public MetaWithKeys {
    * @param repo - Repository type (only used to improve the error messages)
    * @param role - The Uptane role of the signed metadata object
    * @param signed_object
-   * @return
    */
   void UnpackSignedObject(RepositoryType repo, const Role &role, const Json::Value &signed_object) override;
 

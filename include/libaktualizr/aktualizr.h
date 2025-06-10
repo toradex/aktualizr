@@ -208,7 +208,6 @@ class Aktualizr {
    * actual binary data and does not preclude a re-download if a target matches
    * current metadata.
    * @param target Target object matching the desired target in the storage
-   * @return true if successful
    *
    * @throw SQLException
    * @throw std::runtime_error (error getting targets from database or filesystem)
