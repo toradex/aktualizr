@@ -192,17 +192,6 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)")
     # Enable maximum set of warnings.
     add_definitions(-Wall -Wextra -Wformat-security -Wfloat-equal -Wcast-qual -Wswitch-default -Wconversion)
     # only for CXX, gcc doesn't like that when building C...
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wnon-virtual-dtor")
-    if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-        add_definitions(-Wlogical-op)
-    else ()
-        add_definitions(-Wno-unused-private-field)
-    endif ()
-
-    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "4.9" OR CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9")
-        add_definitions(-Wshadow)
-    endif ()
-
     if (WARNING_AS_ERROR)
         add_definitions(-Werror)
     endif ()
