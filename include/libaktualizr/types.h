@@ -33,6 +33,15 @@ std::ostream &operator<<(std::ostream &os, VerificationType vtype);
 enum class UpdateType { kOnline = 0, kOffline };
 std::ostream &operator<<(std::ostream &os, UpdateType utype);
 
+enum class InstallUpdatesAutomatically {
+  // These are stored in the database. Don't re-number them
+  /** Proceed automatically and don't ask for user consent */
+  kProceed = 0,
+  /** Ask the user whether to install an update */
+  kAsk,
+  kLast = kAsk
+};
+
 namespace utils {
 /**
  * @brief The BasedPath class

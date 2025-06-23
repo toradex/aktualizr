@@ -10,9 +10,9 @@
 #include "uptane/imagerepository.h"
 #include "utilities/utils.h"
 
-boost::filesystem::path test_data_dir;
+boost::filesystem::path test_data_dir;  // NOLINT
 
-typedef boost::tokenizer<boost::char_separator<char> > sql_tokenizer;
+using sql_tokenizer = boost::tokenizer<boost::char_separator<char>>;
 
 static std::map<std::string, std::string> parseSchema() {
   std::map<std::string, std::string> result;
@@ -541,6 +541,26 @@ TEST(sqlstorage, store_and_load_report_events) {
     storage->deleteReportEvents(max_id);
     processed_events += l;
   }
+}
+
+TEST(sqlstorage, Consent) {
+  TemporaryDirectory temp_dir;
+  StorageConfig config;
+  config.path = temp_dir.Path();
+  auto storage = INvStorage::newStorage(config);
+
+  InstallUpdatesAutomatically res;
+  bool ok = storage->loadInstallUpdatesAutomatically(&res);
+  EXPECT_FALSE(ok) << "Should have no information by default";
+
+  storage->storeInstallUpdatesAutomatically(InstallUpdatesAutomatically::kAsk);
+  ok = storage->loadInstallUpdatesAutomatically(&res);
+  EXPECT_TRUE(ok) << "Once stored, it can be read";
+  EXPECT_EQ(res, InstallUpdatesAutomatically::kAsk) << "It should round-trip";
+
+  storage->storeInstallUpdatesAutomatically(InstallUpdatesAutomatically::kProceed);
+  ok = storage->loadInstallUpdatesAutomatically(&res);
+  EXPECT_EQ(res, InstallUpdatesAutomatically::kProceed) << "It can be changed";
 }
 
 #ifndef __NO_MAIN__

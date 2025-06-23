@@ -9,6 +9,7 @@
 #include "libaktualizr/config.h"
 #include "libaktualizr/events.h"
 #include "libaktualizr/secondaryinterface.h"
+#include "libaktualizr/types.h"
 #include "primary/consent.h"
 #include "primary/update_lock_file.h"
 
@@ -161,6 +162,7 @@ class Aktualizr {
   /**
    * Download targets.
    * @param updates Vector of targets to download as provided by CheckUpdates.
+   * @param update_type Online vs offline updates, default to Online
    * @return std::future object with information about download results.
    *
    * @throw SQLException
@@ -168,7 +170,8 @@ class Aktualizr {
    * @throw std::system_error (failure to lock a mutex)
    * @throw SotaUptaneClient::NotProvisionedYet (called before provisioning complete)
    */
-  std::future<result::Download> Download(const std::vector<Uptane::Target>& updates, UpdateType = UpdateType::kOnline);
+  std::future<result::Download> Download(const std::vector<Uptane::Target>& updates,
+                                         UpdateType update_type = UpdateType::kOnline);
 
   struct InstallationLogEntry {
     Uptane::EcuSerial ecu;
@@ -227,6 +230,7 @@ class Aktualizr {
    * Install targets.
    * @param updates Vector of targets to install as provided by CheckUpdates or
    * Download.
+   * @param update_type Online vs offline updates, default to Online
    * @return std::future object with information about installation results.
    *
    * @throw SQLException
@@ -235,7 +239,8 @@ class Aktualizr {
    * @throw std::system_error (failure to lock a mutex)
    * @throw SotaUptaneClient::NotProvisionedYet (called before provisioning complete)
    */
-  std::future<result::Install> Install(const std::vector<Uptane::Target>& updates, UpdateType = UpdateType::kOnline);
+  std::future<result::Install> Install(const std::vector<Uptane::Target>& updates,
+                                       UpdateType update_type = UpdateType::kOnline);
 
 #ifdef BUILD_OFFLINE_UPDATES
   /**
@@ -452,6 +457,11 @@ class Aktualizr {
    */
   ExitReason RunUpdateLoop();
 
+  /**
+   * Record a installation failure in the manifest we send.
+   */
+  void StoreInstallationFailure(data::InstallationResult result);
+
   UpdateCycleState state_{UpdateCycleState::kUnprovisioned};
   // These hold a running operation for the current state
   std::future<void> op_void_;
@@ -485,15 +495,15 @@ class Aktualizr {
     kUntilRebootNeeded,  // Run 'forever' i.e. until a reboot is needed
     kStop,               // Stop the update cycle immediately
   };
-  struct {
+  struct ExitCond {
     std::mutex m;
     std::condition_variable cv;
-    RunMode run_mode = RunMode::kStop;
-    RunMode get() {
+    Aktualizr::RunMode run_mode{RunMode::kStop};
+    Aktualizr::RunMode get() {
       std::lock_guard<std::mutex> const guard{m};
       return run_mode;
     }
-    bool had_shoulder_tap{false};
+    bool check_for_updates_now{false};
   } exit_cond_;
 
   std::shared_ptr<INvStorage> storage_;

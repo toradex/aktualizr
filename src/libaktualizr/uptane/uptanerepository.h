@@ -45,8 +45,6 @@ class RepositoryCommon {
   void updateRoot(INvStorage &storage, const IMetadataFetcher &fetcher, RepositoryType repo_type);
   [[nodiscard]] TimeStamp Now() const;
 
-  static const int64_t kMaxRotations = 1000;
-
   Root root{Root::Policy::kRejectAll};
   RepositoryType type;
 

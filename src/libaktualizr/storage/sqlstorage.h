@@ -113,6 +113,9 @@ class SQLStorage : public SQLStorageBase, public INvStorage {
   std::vector<std::string> getAllTargetNames() const override;
   void deleteTargetInfo(const std::string& targetname) const override;
 
+  void storeInstallUpdatesAutomatically(InstallUpdatesAutomatically install_automatically) override;
+  bool loadInstallUpdatesAutomatically(InstallUpdatesAutomatically* install_automatically) const override;
+
   StorageType type() override { return StorageType::kSqlite; };
 
  private:

@@ -1750,3 +1750,39 @@ void SQLStorage::deleteTargetInfo(const std::string& targetname) const {
     throw SQLException(std::string("Failed to clear Target filenames: ") + db.errmsg());
   }
 }
+
+void SQLStorage::storeInstallUpdatesAutomatically(InstallUpdatesAutomatically install_automatically) {
+  SQLite3Guard db = dbConnection();
+
+  auto statement =
+      db.prepareStatement<int>("INSERT OR REPLACE INTO consent_config (property, value) VALUES ('consent', ?);",
+                               static_cast<int>(install_automatically));
+
+  if (statement.step() != SQLITE_DONE) {
+    LOG_ERROR << "Failed to store consent required " << db.errmsg();
+    throw SQLException(std::string("Failed to store consent required") + db.errmsg());
+  }
+}
+
+bool SQLStorage::loadInstallUpdatesAutomatically(InstallUpdatesAutomatically* install_automatically) const {
+  assert(install_automatically != nullptr);
+  SQLite3Guard db = dbConnection();
+  auto statement = db.prepareStatement<>("SELECT value FROM consent_config WHERE property='consent';");
+
+  int result = statement.step();
+  if (result == SQLITE_DONE) {
+    return false;
+  }
+
+  if (result != SQLITE_ROW) {
+    LOG_ERROR << "Failed to read consent_config " << db.errmsg();
+    throw SQLException(std::string("Failed to get read consent_config ") + db.errmsg());
+  }
+  auto res = statement.get_result_col_int(0);
+  if ((res < 0) || (res > static_cast<int64_t>(InstallUpdatesAutomatically::kLast))) {
+    LOG_ERROR << "Found out-of-range consent configuration in consent_config:" << res;
+    return false;
+  }
+  *install_automatically = static_cast<InstallUpdatesAutomatically>(res);
+  return true;
+}

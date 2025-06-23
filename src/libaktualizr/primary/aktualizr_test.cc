@@ -337,9 +337,9 @@ TEST(Aktualizr, FullWithUpdates) {
 
   EXPECT_EQ(
       http->report_events(),
-      (std::vector<std::string>{"AwaitingConsent", "EcuDownloadStarted", "EcuDownloadCompleted", "EcuDownloadStarted",
-                                "EcuDownloadCompleted", "EcuInstallationStarted", "EcuInstallationStarted",
-                                "EcuInstallationCompleted", "EcuInstallationCompleted"}));
+      (std::vector<std::string>{"AwaitingConsent", "ConsentOutcome", "EcuDownloadStarted", "EcuDownloadCompleted",
+                                "EcuDownloadStarted", "EcuDownloadCompleted", "EcuInstallationStarted",
+                                "EcuInstallationStarted", "EcuInstallationCompleted", "EcuInstallationCompleted"}));
 }
 
 /*
@@ -750,9 +750,9 @@ TEST(Aktualizr, FinalizationFailure) {
       "InstallStarted",         "InstallTargetComplete",  "InstallTargetComplete",  "AllInstallsComplete"};
 
   std::vector<std::string> expected_report_order = {
-      "AwaitingConsent",        "EcuDownloadStarted",     "EcuDownloadCompleted",
-      "EcuDownloadStarted",     "EcuDownloadCompleted",   "EcuInstallationStarted",
-      "EcuInstallationStarted", "EcuInstallationApplied", "EcuInstallationCompleted"};
+      "AwaitingConsent",        "ConsentOutcome",          "EcuDownloadStarted",     "EcuDownloadCompleted",
+      "EcuDownloadStarted",     "EcuDownloadCompleted",    "EcuInstallationStarted", "EcuInstallationStarted",
+      "EcuInstallationApplied", "EcuInstallationCompleted"};
 
   const std::string primary_ecu_id = "CA:FE:A6:D2:84:9D";
   const std::string secondary_ecu_id = "secondary_ecu_serial";
@@ -895,7 +895,7 @@ TEST_F(AktualizrFailureTest, Primary) {
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
 
   EXPECT_EQ(http_server_mock_->report_events(),
-            (std::vector<std::string>{"AwaitingConsent", "EcuDownloadStarted", "EcuDownloadCompleted",
+            (std::vector<std::string>{"AwaitingConsent", "ConsentOutcome", "EcuDownloadStarted", "EcuDownloadCompleted",
                                       "EcuDownloadStarted", "EcuDownloadCompleted", "EcuInstallationStarted",
                                       "EcuInstallationStarted", "EcuInstallationCompleted"}));
 
@@ -947,7 +947,7 @@ TEST_F(AktualizrFailureTest, SecondaryDownloadFails) {
 
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
   EXPECT_EQ(http_server_mock_->report_events(),
-            (std::vector<std::string>{"AwaitingConsent", "EcuDownloadStarted", "EcuDownloadCompleted",
+            (std::vector<std::string>{"AwaitingConsent", "ConsentOutcome", "EcuDownloadStarted", "EcuDownloadCompleted",
                                       "EcuDownloadStarted", "EcuDownloadCompleted", "EcuInstallationStarted"}));
 
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
@@ -990,9 +990,9 @@ TEST_F(AktualizrFailureTest, SecondaryInstallFails) {
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
   EXPECT_EQ(
       http_server_mock_->report_events(),
-      (std::vector<std::string>{"AwaitingConsent", "EcuDownloadStarted", "EcuDownloadCompleted", "EcuDownloadStarted",
-                                "EcuDownloadCompleted", "EcuInstallationStarted", "EcuInstallationStarted",
-                                "EcuInstallationCompleted", "EcuInstallationCompleted"}));
+      (std::vector<std::string>{"AwaitingConsent", "ConsentOutcome", "EcuDownloadStarted", "EcuDownloadCompleted",
+                                "EcuDownloadStarted", "EcuDownloadCompleted", "EcuInstallationStarted",
+                                "EcuInstallationStarted", "EcuInstallationCompleted", "EcuInstallationCompleted"}));
 
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
   EXPECT_TRUE(http_server_mock_->wasInstallSuccessful(primary_ecu_id));
@@ -1033,7 +1033,7 @@ TEST_F(AktualizrFailureTest, PrimaryAndSecondaryInstallFails) {
 
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
   EXPECT_EQ(http_server_mock_->report_events(),
-            (std::vector<std::string>{"AwaitingConsent", "EcuDownloadStarted", "EcuDownloadCompleted",
+            (std::vector<std::string>{"AwaitingConsent", "ConsentOutcome", "EcuDownloadStarted", "EcuDownloadCompleted",
                                       "EcuDownloadStarted", "EcuDownloadCompleted", "EcuInstallationStarted",
                                       "EcuInstallationStarted", "EcuInstallationCompleted"}));
 
@@ -1074,9 +1074,9 @@ TEST_F(AktualizrFailureTest, HappyPath) {
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
   EXPECT_EQ(
       http_server_mock_->report_events(),
-      (std::vector<std::string>{"AwaitingConsent", "EcuDownloadStarted", "EcuDownloadCompleted", "EcuDownloadStarted",
-                                "EcuDownloadCompleted", "EcuInstallationStarted", "EcuInstallationStarted",
-                                "EcuInstallationCompleted", "EcuInstallationCompleted"}));
+      (std::vector<std::string>{"AwaitingConsent", "ConsentOutcome", "EcuDownloadStarted", "EcuDownloadCompleted",
+                                "EcuDownloadStarted", "EcuDownloadCompleted", "EcuInstallationStarted",
+                                "EcuInstallationStarted", "EcuInstallationCompleted", "EcuInstallationCompleted"}));
 
   EXPECT_FALSE(aktualizr_.uptane_client()->hasPendingUpdates());
   EXPECT_TRUE(http_server_mock_->wasInstallSuccessful(primary_ecu_id));

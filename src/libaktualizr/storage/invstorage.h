@@ -152,6 +152,10 @@ class INvStorage {
   virtual std::vector<std::string> getAllTargetNames() const = 0;
   virtual void deleteTargetInfo(const std::string& targetname) const = 0;
 
+  // D-Bus Consent
+  virtual void storeInstallUpdatesAutomatically(InstallUpdatesAutomatically install_automatically) = 0;
+  virtual bool loadInstallUpdatesAutomatically(InstallUpdatesAutomatically* install_automatically) const = 0;
+
   // Special constructors and utilities
   static std::shared_ptr<INvStorage> newStorage(const StorageConfig& config, bool readonly = false);
   static void FSSToSQLS(FSStorageRead& fs_storage, SQLStorage& sql_storage);
