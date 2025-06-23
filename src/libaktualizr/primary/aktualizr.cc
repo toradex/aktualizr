@@ -9,6 +9,7 @@
 #include "json/json.h"
 #include "libaktualizr/aktualizr.h"
 #include "libaktualizr/events.h"
+#include "libaktualizr/results.h"
 #include "libaktualizr/types.h"
 #include "logging/logging.h"
 #include "primary/consent.h"
@@ -167,8 +168,11 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
             if (state_ == UpdateCycleState::kGetConsent) {
               consent_->PendingUpdateCancelled();
             }
-            api_queue_->abort();
+            // Asynchronously cancel the current operation
+            api_queue_->Cancel();
             // TODO: How can we send an 'update failed' the next time we have idle network
+
+            // Queue an offline update check for after the cancel finishes
             op_update_check_ = CheckUpdatesOffline(config_.uptane.offline_updates_source);
             state_ = UpdateCycleState::kCheckingForUpdatesOffline;
           }
@@ -291,9 +295,18 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
             op_download_ = Download(update_result_.updates);
             state_ = UpdateCycleState::kDownloading;
           } else {
-            LOG_WARNING << "User refused consent of update: " << consent.reason;
-            data::InstallationResult failure_result(data::ResultCode::Numeric::kConsentRefused, consent.reason);
+            data::ResultCode::Numeric result_code;
+            if (consent.was_cancelled) {
+              LOG_INFO << "Install cancelled while waiting for consent";
+              result_code = data::ResultCode::Numeric::kOperationCancelled;
+            } else {
+              LOG_WARNING << "User refused consent of update: " << consent.reason;
+              result_code = data::ResultCode::Numeric::kConsentRefused;
+            }
+            data::InstallationResult failure_result(result_code, consent.reason);
             StoreInstallationFailure(failure_result);
+            // This sends the manifest in the cancelled case. It isn't clear if
+            // this is the 'right' thing to do or not.
             SendManifest();
             state_ = UpdateCycleState::kIdle;
           }
@@ -430,12 +443,12 @@ std::vector<SecondaryInfo> Aktualizr::GetSecondaries() const {
 
 std::future<bool> Aktualizr::AttemptProvision() {
   std::function<bool()> task([this] { return uptane_client_->attemptProvision(); });
-  return api_queue_->enqueue(std::move(task));
+  return api_queue_->enqueue(std::move(task), false);
 }
 
 std::future<result::CampaignCheck> Aktualizr::CampaignCheck() {
   std::function<result::CampaignCheck()> task([this] { return uptane_client_->campaignCheck(); });
-  return api_queue_->enqueue(std::move(task));
+  return api_queue_->enqueue(std::move(task), result::CampaignCheck({}));
 }
 
 std::future<void> Aktualizr::CampaignControl(const std::string &campaign_id, campaign::Cmd cmd) {
@@ -479,19 +492,22 @@ std::future<void> Aktualizr::CompleteSecondaryUpdates() {
 
 std::future<result::UpdateCheck> Aktualizr::CheckUpdates() {
   std::function<result::UpdateCheck()> task([this] { return uptane_client_->fetchMeta(); });
-  return api_queue_->enqueue(std::move(task));
+  return api_queue_->enqueue(std::move(task), result::UpdateCheck());
 }
 
 std::future<result::Download> Aktualizr::Download(const std::vector<Uptane::Target> &updates, UpdateType update_type) {
   std::function<result::Download()> task(
       [this, updates, update_type]() { return uptane_client_->downloadImages(updates, update_type); });
-  return api_queue_->enqueue(std::move(task));
+  return api_queue_->enqueue(std::move(task), result::Download({}, result::DownloadStatus::kError, "Cancelled"));
 }
 
 std::future<result::Install> Aktualizr::Install(const std::vector<Uptane::Target> &updates, UpdateType update_type) {
   std::function<result::Install()> task(
       [this, updates, update_type] { return uptane_client_->uptaneInstall(updates, update_type); });
-  return api_queue_->enqueue(std::move(task));
+  return api_queue_->enqueue(
+      std::move(task),
+      result::Install(
+          data::InstallationResult(false, data::ResultCode::Numeric::kOperationCancelled, "Operation Cancelled"), {}));
 }
 
 void Aktualizr::StoreInstallationFailure(data::InstallationResult result) {
@@ -505,7 +521,7 @@ bool Aktualizr::SetInstallationRawReport(const std::string &custom_raw_report) {
 
 std::future<bool> Aktualizr::SendManifest(const Json::Value &custom) {
   std::function<bool()> task([this, custom]() { return uptane_client_->putManifest(custom); });
-  return api_queue_->enqueue(std::move(task));
+  return api_queue_->enqueue(std::move(task), false);
 }
 
 result::Pause Aktualizr::Pause() {
@@ -526,7 +542,12 @@ result::Pause Aktualizr::Resume() {
   }
 }
 
-void Aktualizr::Abort() { api_queue_->abort(); }
+void Aktualizr::Abort() { api_queue_->Cancel().wait(); }
+
+std::shared_future<void> Aktualizr::Cancel() {
+  consent_->PendingUpdateCancelled();
+  return api_queue_->Cancel();
+}
 
 boost::signals2::connection Aktualizr::SetSignalHandler(
     const std::function<void(std::shared_ptr<event::BaseEvent>)> &handler) {
@@ -565,6 +586,9 @@ void Aktualizr::SetDbusInterface(SdBus &&bus) {
     exit_cond_.check_for_updates_now = true;
     exit_cond_.cv.notify_all();
   });
+
+  dbus_adaptor->SetCancelCallback([this] { Cancel(); });
+
   consent_ = std::move(dbus_adaptor);
 }
 
@@ -605,7 +629,7 @@ bool Aktualizr::OfflineUpdateAvailable() {
 std::future<result::UpdateCheck> Aktualizr::CheckUpdatesOffline(const fs::path &source_path) {
   std::function<result::UpdateCheck()> task(
       [this, source_path] { return uptane_client_->fetchMetaOffUpd(source_path); });
-  return api_queue_->enqueue(std::move(task));
+  return api_queue_->enqueue(std::move(task), result::UpdateCheck({}, 0, result::UpdateStatus::kError, ""));
 }
 
 #endif

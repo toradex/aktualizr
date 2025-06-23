@@ -10,7 +10,8 @@
 class Consent {
  public:
   struct Outcome {
-    bool granted;
+    bool granted{false};
+    bool was_cancelled{false};
     std::string reason;
   };
   Consent() = default;
@@ -41,7 +42,7 @@ class TrivialConsent : public Consent {
   TrivialConsent() = default;
   std::future<Outcome> GetConsent(const std::vector<Uptane::Target>& /* targets */) override {
     std::promise<Outcome> p;
-    p.set_value({true, "Granted Trivially"});
+    p.set_value({true, false, "Granted Trivially"});
     return p.get_future();
   }
 

@@ -316,9 +316,12 @@ class Aktualizr {
    * to finish; then removes all other queued calls.
    * This doesn't reset the `Paused` state, i.e. if the queue was previously
    * paused, it will remain paused, but with an emptied queue.
-   * The call is blocking.
-   *
-   * @throw std::system_error (failure to lock a mutex)
+   * Returns a future that completes when the cancellation is complete.
+   */
+  std::shared_future<void> Cancel();
+
+  /**
+   * A synchronous version of \ref Cancel.
    */
   void Abort();
 

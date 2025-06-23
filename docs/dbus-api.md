@@ -8,6 +8,7 @@ Last Updated 2025-05-06 by Phil Wise.
 
 * Approve updates (required by the EU Cyber Resilience Act)
 * Trigger an immediate update check (useful if you have an out-of-band wake-up source already)
+* Cancel an in-progress update
 
 Note this is the extent of the API: \aktualizr is not intended to be used as a library.
 If you want to use \aktualizr for a use case that we don't support today, implement the missing features directly in the upstream codebase and enable them via configuration.
@@ -133,6 +134,14 @@ When working interactively with a device, this can be easier than running a shor
 
     busctl call org.uptane.Aktualizr /org/uptane/aktualizr org.uptane.Aktualizr CheckForUpdates
 
+## Cancel an Update
+
+Cancel aborts the current update and returns \aktualizr back to an idle state.
+The cancel D-Bus call is asynchronous and updates will continue until a suitable cancellation point.
+
+    busctl call org.uptane.Aktualizr /org/uptane/aktualizr org.uptane.Aktualizr Cancel
+
+
 ## Security Considerations
 
 The key security control is that the D-Bus API doesn’t provide any new rights to install software.
@@ -144,7 +153,6 @@ In the future it will be possible to trigger an offline update over D-Bus, but t
 
 The following are future features:
 
-  * Using the D-Bus interface to cancel an operation in progress
   * Perform offline updates from a specific directory
   * Disabling (locking) updates
   
