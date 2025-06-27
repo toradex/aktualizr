@@ -369,6 +369,10 @@ bool DockerTarballLoader::loadMetadata() {
   }
   archive_read_free(arch);
 
+  // Consume the rest of the file (if any).
+  while (archctrl->read())
+    ;
+
   // Save original digest so we can check it upon loading the images.
   org_tarball_digest_ = archctrl->getHexDigest();
   org_tarball_length_ = archctrl->nread();
@@ -595,6 +599,9 @@ bool DockerTarballLoader::loadImages() {
     cur_block.len = static_cast<size_t>(infile.gcount());
     cur_block.used = true;
 
+    // Update digest.
+    hasher->update(cur_block.buf.data(), static_cast<uint64_t>(cur_block.len));
+
     // Prevent modifications of file size: this is very important to avoid attacks
     // where extraneous data is appended to the end marker of the tarball.
     nread += static_cast<uint64_t>(infile.gcount());
@@ -602,9 +609,6 @@ bool DockerTarballLoader::loadImages() {
       LOG_WARNING << "Size of tarball has changed (aborting)";
       break;
     }
-
-    // Update digest.
-    hasher->update(cur_block.buf.data(), static_cast<uint64_t>(cur_block.len));
 
     // Advance.
     block_index = (block_index + 1) & num_blocks_mask;
