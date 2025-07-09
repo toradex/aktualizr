@@ -24,11 +24,11 @@ static const std::string JSON_EXT = ".json";
 static const std::string TAR_EXT = ".tar";
 
 // Maximum size of a manifest file.
-static constexpr std::size_t MAX_MANIFEST_FILE_SIZE_BYTES = 256 * 1024;
+static constexpr std::size_t MAX_MANIFEST_FILE_SIZE_BYTES = 256L * 1024;
 
 // Limits on the compose file.
 static constexpr std::size_t MAX_COMPOSE_LINE_SIZE_BYTES = 4096;
-static constexpr std::size_t MAX_COMPOSE_FILE_SIZE_BYTES = 4 * 1024 * 1024;
+static constexpr std::size_t MAX_COMPOSE_FILE_SIZE_BYTES = 4L * 1024 * 1024;
 
 // ---
 // Global definitions

@@ -1168,8 +1168,7 @@ result::Install SotaUptaneClient::uptaneInstall(const std::vector<Uptane::Target
         const Uptane::EcuSerial &ecu_serial = ecusIt->first;
 
         if (primary_ecu_serial == ecu_serial) {
-          auto primary_update = *update;
-          primary_installs.push_back(primary_update);
+          primary_installs.push_back(*update);
         } else {
           auto f = secondaries.find(ecu_serial);
           if (f != secondaries.end()) {

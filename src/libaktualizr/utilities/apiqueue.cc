@@ -17,7 +17,7 @@ void CommandQueue::run() {
   std::lock_guard<std::mutex> g(thread_m_);
   if (!thread_.joinable()) {
     thread_ = std::thread([this] {
-      Context ctx{.flow_control = &token_};
+      Context ctx{&token_};
       std::unique_lock<std::mutex> lock(m_);
       for (;;) {
         cv_.wait(lock, [this] { return (!queue_.empty() && !paused_) || shutdown_; });

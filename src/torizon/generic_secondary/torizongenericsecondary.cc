@@ -22,8 +22,6 @@ namespace bf = boost::filesystem;
 
 namespace Primary {
 
-constexpr const char* const TorizonGenericSecondaryConfig::Type;
-
 TorizonGenericSecondaryConfig::TorizonGenericSecondaryConfig(const Json::Value& json_config)
     : ManagedSecondaryConfig(Type) {
   partial_verifying = json_config["partial_verifying"].asBool();

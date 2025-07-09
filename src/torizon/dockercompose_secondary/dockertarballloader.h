@@ -56,8 +56,7 @@ class DockerTarballLoader {
   /**
    * Constructor.
    */
-  explicit DockerTarballLoader(boost::filesystem::path tarball)
-      : tarball_(std::move(tarball)), org_tarball_length_(0) {}
+  explicit DockerTarballLoader(boost::filesystem::path tarball) : tarball_(std::move(tarball)) {}
 
   /**
    * Parse tarball archive and load all metadata (JSON) files into
@@ -86,7 +85,7 @@ class DockerTarballLoader {
  protected:
   boost::filesystem::path tarball_;
   std::string org_tarball_digest_;
-  uint64_t org_tarball_length_;
+  uint64_t org_tarball_length_{};
   MetadataMap metamap_;
   MetaStats metastats_;
 
