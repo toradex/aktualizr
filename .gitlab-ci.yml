@@ -1,74 +1,188 @@
-image: ubuntu:focal
+workflow:
+  rules:
+    # Run pipeline for merge requests
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: always
+
+    # Run pipeline for pushes only if there is no MR
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_OPEN_MERGE_REQUESTS == null'
+      when: always
+
+    # In all other cases, don't run a pipeline
+    - when: never
+
+image: docker:latest
 
 variables:
-  GIT_STRATEGY: clone
-  DEBIAN_FRONTEND: noninteractive
+  RUNNER_TAG:
+    value: "saas-linux-medium-amd64"
+    description: 'Runner tag.'
+  E:
+    value: ""
+    description: 'Prefix to all commands (set to "echo" for dry running).'
+
+default:
+  tags:
+    - $RUNNER_TAG
+
+services:
+  - name: docker:dind
 
 stages:
-  - run-tests
+  - tests
 
-run-tests:
-  stage: run-tests
-  artifacts:
-    when: always
-    paths:
-      - log/
+# .test-base: Reusable block for building and testing Aktualizr inside a container.
+#
+# Required input variables:
+# - DOCKER_IMG: name of the Docker image to build without the tag
+# - DOCKER_TAG: tag to assign the image (an extra suffix will be added)
+# - DOCKERFILE: Dockerfile that will produce the image
+#
+.test-base:
+  stage: tests
   before_script:
+    - '[ -n "${DOCKER_IMG}" ] || { echo "Variable DOCKER_IMG must be set"; false; }'
+    - '[ -n "${DOCKER_TAG}" ] || { echo "Variable DOCKER_TAG must be set"; false; }'
+    - '[ -n "${DOCKERFILE}" ] || { echo "Variable DOCKERFILE must be set"; false; }'
+
+    - echo -e "\e[0Ksection_start:$(date +%s):pull_submodules\r\e[0KFetch Aktualizr submodules"
+    - ${E} apk update
+    - ${E} apk add git ca-certificates
+    - ${E} git submodule update --init --recursive
+    - echo -e "\e[0Ksection_end:$(date +%s):pull_submodules\r\e[0K"
+
+    - echo -e "\e[0Ksection_start:$(date +%s):build_container\r\e[0KBuild test container"
+    - ${E} docker login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+    - suf=${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}
+    - suf=${suf:-${CI_COMMIT_BRANCH}}
+    - suf=${suf?Could not determine tag suffix}
+    - tag="${CI_REGISTRY_IMAGE}/${DOCKER_IMG}:${DOCKER_TAG}-${suf}"
+    # Reference: https://docs.gitlab.com/ci/docker/docker_layer_caching/
+    - ${E} docker pull "${tag}" || true
+    - ${E} docker build --build-arg BUILDKIT_INLINE_CACHE=1
+                        --cache-from "${tag}" --tag "${tag}" -f "${DOCKERFILE}" .
+    - echo -e "\e[0Ksection_end:$(date +%s):build_container\r\e[0K"
+
+    - echo -e "\e[0Ksection_start:$(date +%s):update_registry\r\e[0KUpdate Docker cache"
+    - ${E} docker push "${tag}"
+    - echo -e "\e[0Ksection_end:$(date +%s):update_registry\r\e[0K"
+
+    # Helpers to run commands inside the test container (available in the "script" section).
     - |
-      runcmd() {
-        local logfile="${1}"
-        shift
-        if ! $* >"${logfile}" 2>&1; then
-            echo "Execution of '$*' failed:"
-            cat ${logfile}
-            false
-        fi
+      docker_run() {
+          ${E} docker run \
+               --mount="type=volume,source=build-vol,destination=/home/testuser/build" \
+               --mount="type=volume,source=cache-vol,destination=/home/testuser/.cache" \
+               --rm -i "${tag}" "$@"
       }
-    - mkdir -p log
-    - runcmd log/update.txt apt update
-    - runcmd log/upgrade.txt apt upgrade -y
-    - runcmd log/install.txt apt install -y --no-install-suggests --no-install-recommends 
-      git 
-      asn1c 
-      build-essential 
-      cmake 
-      curl 
-      libarchive-dev 
-      libboost-dev 
-      libboost-filesystem-dev 
-      libboost-log-dev
-      libboost-program-options-dev 
-      libcurl4-openssl-dev 
-      libpthread-stubs0-dev 
-      libsodium-dev 
-      libsqlite3-dev 
-      libssl-dev 
-      python3 
-      net-tools 
-      python3-dev 
-      python3-openssl 
-      python3-requests 
-      python3-venv 
-      sqlite3 
-      valgrind 
-      clang 
-      clang-format-11 
-      clang-tidy-11 
-      libostree-dev 
-      ostree
-    - runcmd log/submodule.txt git submodule update --init --recursive
+      docker_cmd() {
+          docker_run bash -c "$@"
+      }
+
+    # Helpers to restore/save ccache
+    - |
+      restore_ccache() {
+          docker_run tar -xf- < "${CI_PROJECT_DIR}/${1?missing tarball name}" || echo "No cache found"
+          docker_run ccache --zero-stats
+      }
+      save_ccache() {
+          docker_run ccache --show-stats
+          docker_run tar -cf- ".cache" > "${CI_PROJECT_DIR}/${1?missing tarball name}"
+      }
+
+# NOTES:
+#
+# - We do not run check-format on bullseye; the "right" format will be defined by the checks
+#   performed on Debian bookworm.
+#
+# - We build, run tests and clang-tidy on both Debian bullseye and bookworm such that we'll always
+#   try to keep Aktualizr building free of warnings and running correctly on both environments.
+#
+test-bullseye-p11:
+  extends: .test-base
+  variables:
+    DOCKER_IMG: aktualizr-ci
+    DOCKER_TAG: bullseye
+    DOCKERFILE: docker/Dockerfile.debian.bullseye
+    TEST_SCRIPT: source/scripts/build-and-test-bullseye.sh
+    CCACHE_TAR: cache-bullseye.tar
+  cache:
+    key: "${CI_COMMIT_REF_SLUG}"
+    paths:
+      - "${CCACHE_TAR}"
   script:
-    - mkdir build && cd build
-    # Enable BUILD_OSTREE or else build fails
-    - runcmd ../log/cmake.txt cmake .. -DBUILD_OSTREE:BOOL=ON
-    - runcmd ../log/make.txt make -j4
-    - runcmd ../log/build_tests.txt make -j4 build_tests
-    - runcmd ../log/check-format.txt make -j4 check-format
-    # Requires "|| true" for pipeline to not fail and end due to current errors
-    - runcmd ../log/clang-tidy.txt make -j4 -k clang-tidy || true
-    # * CTEST_OUTPUT_ON_FAILURE=1 enables debug output
-    # * OSTREE_SYSROOT_DEBUG="mutable-deployments" prevents the generation of
-    #   immutable OSTree deployments; w/o this Docker would have trouble with
-    #   pruning container layers.
-    # * Not allowing parallel jobs, can cause some tests to not run and ruins order of output
-    - runcmd ../log/test.txt make test CTEST_OUTPUT_ON_FAILURE=1 OSTREE_SYSROOT_DEBUG="mutable-deployments"
+    - restore_ccache "${CCACHE_TAR}"
+
+    - echo -e "\e[0Ksection_start:$(date +%s):gen_buildsys\r\e[0KGenerate build-system files"
+    - docker_cmd "GEN_BUILDSYS=1 BLD_DEFAULT=0 BLD_TESTS=0 RUN_TESTS=0 RUN_CHECK_FORMAT=0 RUN_CLANG_TIDY=0 ${TEST_SCRIPT}"
+    - echo -e "\e[0Ksection_end:$(date +%s):gen_buildsys\r\e[0K"
+
+    - echo -e "\e[0Ksection_start:$(date +%s):build_aktualizr\r\e[0KBuild Aktualizr"
+    - docker_cmd "GEN_BUILDSYS=0 BLD_DEFAULT=1 BLD_TESTS=0 RUN_TESTS=0 RUN_CHECK_FORMAT=0 RUN_CLANG_TIDY=0 ${TEST_SCRIPT}"
+    - echo -e "\e[0Ksection_end:$(date +%s):build_aktualizr\r\e[0K"
+
+    - echo -e "\e[0Ksection_start:$(date +%s):build_tests\r\e[0KBuild tests"
+    - docker_cmd "GEN_BUILDSYS=0 BLD_DEFAULT=0 BLD_TESTS=1 RUN_TESTS=0 RUN_CHECK_FORMAT=0 RUN_CLANG_TIDY=0 ${TEST_SCRIPT}"
+    - echo -e "\e[0Ksection_end:$(date +%s):build_tests\r\e[0K"
+
+    - save_ccache "${CCACHE_TAR}"
+
+    - echo -e "\e[0Ksection_start:$(date +%s):run_tests\r\e[0KRun tests"
+    - docker_cmd "GEN_BUILDSYS=0 BLD_DEFAULT=0 BLD_TESTS=0 RUN_TESTS=1 RUN_CHECK_FORMAT=0 RUN_CLANG_TIDY=0 CTEST_PARALLEL_LEVEL=$(nproc) CTEST_OUTPUT_ON_FAILURE=1 ${TEST_SCRIPT}"
+    - echo -e "\e[0Ksection_end:$(date +%s):run_tests\r\e[0K"
+
+    - echo -e "\e[0Ksection_start:$(date +%s):clang_tidy\r\e[0KRun clang-tidy"
+    - docker_cmd "GEN_BUILDSYS=0 BLD_DEFAULT=0 BLD_TESTS=0 RUN_TESTS=0 RUN_CHECK_FORMAT=0 RUN_CLANG_TIDY=1 ${TEST_SCRIPT}"
+    - echo -e "\e[0Ksection_end:$(date +%s):clang_tidy\r\e[0K"
+
+test-bookworm-nop11:
+  extends: .test-base
+  variables:
+    DOCKER_IMG: aktualizr-ci
+    DOCKER_TAG: bookworm
+    DOCKERFILE: docker/Dockerfile.debian.bookworm
+    TEST_SCRIPT: source/scripts/build-and-test-bookworm.sh
+    CCACHE_TAR: cache-bookworm.tar
+  script:
+    - restore_ccache "${CCACHE_TAR}"
+
+    - echo -e "\e[0Ksection_start:$(date +%s):gen_buildsys\r\e[0KGenerate build-system files"
+    - docker_cmd "GEN_BUILDSYS=1 BLD_DEFAULT=0 BLD_TESTS=0 RUN_TESTS=0 RUN_CHECK_FORMAT=0 RUN_CLANG_TIDY=0 ${TEST_SCRIPT}"
+    - echo -e "\e[0Ksection_end:$(date +%s):gen_buildsys\r\e[0K"
+
+    - echo -e "\e[0Ksection_start:$(date +%s):check_format\r\e[0KCheck format"
+    - docker_cmd "GEN_BUILDSYS=0 BLD_DEFAULT=0 BLD_TESTS=0 RUN_TESTS=0 RUN_CHECK_FORMAT=1 RUN_CLANG_TIDY=0 ${TEST_SCRIPT}"
+    - echo -e "\e[0Ksection_end:$(date +%s):check_format\r\e[0K"
+
+    - echo -e "\e[0Ksection_start:$(date +%s):build_aktualizr\r\e[0KBuild Aktualizr"
+    - docker_cmd "GEN_BUILDSYS=0 BLD_DEFAULT=1 BLD_TESTS=0 RUN_TESTS=0 RUN_CHECK_FORMAT=0 RUN_CLANG_TIDY=0 ${TEST_SCRIPT}"
+    - echo -e "\e[0Ksection_end:$(date +%s):build_aktualizr\r\e[0K"
+
+    - echo -e "\e[0Ksection_start:$(date +%s):build_tests\r\e[0KBuild tests"
+    - docker_cmd "GEN_BUILDSYS=0 BLD_DEFAULT=0 BLD_TESTS=1 RUN_TESTS=0 RUN_CHECK_FORMAT=0 RUN_CLANG_TIDY=0 ${TEST_SCRIPT}"
+    - echo -e "\e[0Ksection_end:$(date +%s):build_tests\r\e[0K"
+
+    - save_ccache "${CCACHE_TAR}"
+
+    - echo -e "\e[0Ksection_start:$(date +%s):run_tests\r\e[0KRun tests"
+    - docker_cmd "GEN_BUILDSYS=0 BLD_DEFAULT=0 BLD_TESTS=0 RUN_TESTS=1 RUN_CHECK_FORMAT=0 RUN_CLANG_TIDY=0 CTEST_PARALLEL_LEVEL=$(nproc) CTEST_OUTPUT_ON_FAILURE=1 ${TEST_SCRIPT}"
+    - echo -e "\e[0Ksection_end:$(date +%s):run_tests\r\e[0K"
+
+    - echo -e "\e[0Ksection_start:$(date +%s):clang_tidy\r\e[0KRun clang-tidy"
+    - docker_cmd "GEN_BUILDSYS=0 BLD_DEFAULT=0 BLD_TESTS=0 RUN_TESTS=0 RUN_CHECK_FORMAT=0 RUN_CLANG_TIDY=1 ${TEST_SCRIPT}"
+    - echo -e "\e[0Ksection_end:$(date +%s):clang_tidy\r\e[0K"
+
+# Currently running shellcheck via the bullseye container
+shellcheck:
+  extends: .test-base
+  variables:
+    DOCKER_IMG: aktualizr-ci
+    DOCKER_TAG: bullseye-shellcheck
+    DOCKERFILE: docker/Dockerfile.debian.bullseye
+  script:
+    - echo -e "\e[0Ksection_start:$(date +%s):run_shellcheck\r\e[0KShellcheck"
+    - docker_cmd "find source/ \( -name third_party -prune \) -o -name \*.sh -exec shellcheck -fgcc {} \+"
+    - echo -e "\e[0Ksection_end:$(date +%s):run_shellcheck\r\e[0K"
+
+# TODO: Consider adding a new job similar to "static-check" (upstream)
+# TODO: Consider using clang-tidy-diff.py to only run clang-tidy on changed files
