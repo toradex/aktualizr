@@ -1,7 +1,7 @@
 FROM debian:bookworm
 LABEL Description="Aktualizr CI image using Debian Bookworm (stable)"
 
-ENV DEBIAN_FRONTEND noninteractive
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get -y install --no-install-suggests --no-install-recommends debian-archive-keyring
 
@@ -39,6 +39,7 @@ RUN apt-get update && apt-get -y install -\
   libsodium-dev \
   libsqlite3-dev \
   libssl-dev \
+  libsystemd-dev \
   libtool \
   lshw \
   ninja-build \
@@ -51,11 +52,10 @@ RUN apt-get update && apt-get -y install -\
   python3-gi \
   python3-openssl \
   python3-pip \
+  python3-requests \
   python3-venv \
   sqlite3 \
   zip
-
-
 
 RUN useradd testuser
 
@@ -65,3 +65,4 @@ COPY . /home/testuser/source
 RUN chown -R testuser:testuser /home/testuser/source
 USER testuser
 RUN mkdir /home/testuser/.cache
+RUN mkdir /home/testuser/build
