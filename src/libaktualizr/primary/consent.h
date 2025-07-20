@@ -1,6 +1,7 @@
 #ifndef CONSENT_H_
 #define CONSENT_H_
 
+#include <json/json.h>
 #include "libaktualizr/types.h"
 
 #include <future>
@@ -35,6 +36,12 @@ class Consent {
    * an offline update instead.
    */
   virtual void PendingUpdateCancelled() = 0;
+
+  /**
+   * Convert a list of targets into a JSON format suitable to expose via the
+   * D-Bus Consent API.
+   */
+  static Json::Value TargetsToJson(const std::vector<Uptane::Target>& targets);
 };
 
 class TrivialConsent : public Consent {

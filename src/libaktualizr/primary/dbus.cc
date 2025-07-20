@@ -275,11 +275,8 @@ std::future<Consent::Outcome> Dbus::GetConsent(const std::vector<Uptane::Target>
   std::future<Consent::Outcome> result;
   {
     // Build the new value of the 'Consent' property
-    Json::Value rr{Json::arrayValue};
+    auto formated_targets = TargetsToJson(targets);
 
-    for (const auto &target : targets) {
-      rr.append(target.toDebugJson());
-    }
     // Now lock..
     std::lock_guard<std::mutex> guard{lock_};
 
@@ -290,7 +287,7 @@ std::future<Consent::Outcome> Dbus::GetConsent(const std::vector<Uptane::Target>
     if (!current_consent_request_.empty()) {  // Is the old promise alive?
       promise.set_value({false, true, "Replaced by new request"});
     }
-    current_consent_request_ = Utils::jsonToStr(rr);
+    current_consent_request_ = Utils::jsonToStr(formated_targets);
     result = current_consent_promise_.get_future();
   }
   // Drop lock and wake the D-Bus thread

@@ -64,12 +64,38 @@ For manual testing, `busctl` can be used:
 
 This is the API that will drive a UI to display "An update is available, do you want to install it?" and handle the user's response.
 
-\aktualizr exposes a read-only property called ‘ConsentRequired’.
-If this is non-empty, then it contains a list of Uptane targets from the director in JSON format.
-Property change notifications are provided, and when this is non-empty, the UI should ask the user if they want to install an update, and may use the contents to provide extra context.
-Online and offline updates can be distinguished by the ‘_type’ field.
+\aktualizr exposes a read-only property with change notifications called ‘ConsentRequired’.
+If this is non-empty, then it contains a list of %Uptane Targets from the director in JSON format, for example:
 
-In the \aktualizr state machine this pause occurs between fetching metadata and downloading an update.
+    {
+        "_type" : "Targets",
+        "targets" :
+        {
+            "primary_firmware.txt" :
+            {
+                "custom" :
+                {
+                    "ecuIdentifiers" :
+                    {
+                        "CA:FE:A6:D2:84:9D" :
+                        {
+                            "hardwareId" : "primary_hw"
+                        }
+                    },
+                    "foo" : "bar",
+                    "targetFormat" : "BINARY",
+                    "uri" : "http://customurl/primary.txt"
+                },
+                "hashes" :
+                {
+                    "sha256" : "ef7dbbe324eab86ab67a198f95b46d7fbf79d5ebf4a4c2c72fc7da9d724aac96",
+                    "sha512" : "74743b8e9588842cdb6d4eb1f851b3b7fc3ef1da3caa81c8a536ce200ae7822c12b02297153dd37aeb9117852e98843d9c7a1fe78901543e200f401bfcb1f111"
+                },
+                "length" : 13
+            }
+        }
+    }
+
 
 For manual testing, this can be read with:
 
@@ -87,6 +113,7 @@ For example:
 
 If the user declines then we fail the update with a new uptane::ResultCode of kConsentRefused.
 This will get posted up with the next put manifest as CONSENT_REFUSED, and fail the update in the Web UI.
+The \aktualizr state machine pauses after fetching Updane metadata but before downloading the update itself.
 While the system is waiting for consent we don’t poll for online updates, but an offline update can cause it to cancel.
 This is the same as today where a offline update can cancel a download operation.
 
