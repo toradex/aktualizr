@@ -343,6 +343,59 @@ TEST_F(AktualizrDbus, DbusCancel) {
 }
 
 /**
+ * Validate the D-Bus interface can receive an offline update call
+ */
+TEST_F(AktualizrDbus, DbusOfflineUpdate) {
+  StorageConfig config_storage;
+  config_storage.path = temp_dir_.Path();
+  auto storage = INvStorage::newStorage(config_storage);
+  Dbus dut(std::move(dut_bus_), storage);
+
+  std::atomic<int> calls = 0;
+
+  dut.SetOfflineUpdateCallback([&](const boost::filesystem::path& /*path*/) {
+    // LOG_INFO << "OfflineUpdate path is " << path;
+    calls++;
+  });
+
+  EXPECT_EQ(calls, 0);
+
+  sd_bus_error ret_error = SD_BUS_ERROR_NULL;
+  sd_bus_message* reply = nullptr;
+
+  // Try with an invalid path
+  int res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::OfflineUpdate, &ret_error,
+                               &reply, "s", "");
+  EXPECT_EQ(res, -22) << "Empty path should fail";
+  sd_bus_error_free(&ret_error);
+
+  // try with a relative path
+  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::OfflineUpdate, &ret_error, &reply,
+                           "s", "asdf");
+  EXPECT_EQ(res, -22) << "non-absolute path should fail";
+  sd_bus_error_free(&ret_error);
+
+  // try with an unreadable path
+  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::OfflineUpdate, &ret_error, &reply,
+                           "s", "/root/.ssh");
+  // We expect this to not throw.
+  // EXPECT_EQ(res, -22) << "should fail";
+  sd_bus_error_free(&ret_error);
+
+  TemporaryDirectory tmp_dir;  // Only to get a valid directory path
+  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::OfflineUpdate, &ret_error, &reply,
+                           "s", tmp_dir.Path().c_str());
+  ASSERT_GE(res, 0) << "Call failed " << ret_error.message;
+  sd_bus_error_free(&ret_error);
+
+  res = sd_bus_message_read(reply, "");
+  sd_bus_message_unref(reply);
+
+  ASSERT_EQ(res, 0);
+  EXPECT_EQ(calls, 1);
+}
+
+/**
  * By default, user consent is not requested for updates
  */
 TEST_F(AktualizrDbus, DefaultIsNoConsent) {

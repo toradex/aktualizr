@@ -4,6 +4,7 @@
 #include <future>
 #include <memory>
 
+#include <boost/filesystem/path.hpp>
 #include <boost/signals2.hpp>
 
 #include "libaktualizr/config.h"
@@ -506,6 +507,7 @@ class Aktualizr {
       return run_mode;
     }
     bool check_for_updates_now{false};
+    boost::filesystem::path check_for_offline_updates{};
   } exit_cond_;
 
   std::shared_ptr<INvStorage> storage_;

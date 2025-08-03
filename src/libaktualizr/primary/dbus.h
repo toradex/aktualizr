@@ -9,7 +9,10 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <thread>
+
+#include <boost/filesystem/path.hpp>
 
 #include "primary/consent.h"
 
@@ -51,6 +54,7 @@ class Dbus : public Consent {
   static const char *const CheckForUpdates;
   static const char *const Consent;
   static const char *const ConsentRequired;
+  static const char *const OfflineUpdate;
 
   Dbus(SdBus &&bus, std::shared_ptr<INvStorage> storage);
   ~Dbus() override;
@@ -71,6 +75,8 @@ class Dbus : public Consent {
   //
   // Register callback for Aktualizr
   void SetCancelCallback(std::function<void()> callback);
+  // Register callback for Aktualizr
+  void SetOfflineUpdateCallback(std::function<void(const boost::filesystem::path &)> callback);
 
  private:
   // Launch and stop the Thread to handle D-Bus traffic
@@ -89,6 +95,11 @@ class Dbus : public Consent {
     return cancel_callback_;
   }
 
+  [[nodiscard]] std::function<void(const boost::filesystem::path &)> offline_update_callback() {
+    std::lock_guard<std::mutex> guard{lock_};
+    return offline_update_callback_;
+  }
+
   friend class DbusCb;
   const SdBus bus_;
   const std::shared_ptr<INvStorage> storage_;
@@ -99,6 +110,7 @@ class Dbus : public Consent {
   std::mutex lock_;  // Hold this while modifying anything below
   std::function<void()> check_for_updates_callback_{};
   std::function<void()> cancel_callback_{};
+  std::function<void(const boost::filesystem::path &)> offline_update_callback_{};
   /** The currently in-flight request. Empty => Nothing in flight */
   std::string current_consent_request_;
   /** If there is an in-flight request, then this is valid */

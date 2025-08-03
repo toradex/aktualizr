@@ -1,3 +1,5 @@
+#include <boost/filesystem/operations.hpp>
+#include <boost/system/error_code.hpp>
 #ifndef BUILD_DBUS
 #error "BUILD_DBUS not defined"
 #endif
@@ -31,6 +33,7 @@ const char *const Dbus::Cancel = "Cancel";
 const char *const Dbus::CheckForUpdates = "CheckForUpdates";
 const char *const Dbus::Consent = "Consent";
 const char *const Dbus::ConsentRequired = "ConsentRequired";
+const char *const Dbus::OfflineUpdate = "OfflineUpdate";
 
 SdBus::SdBus(SdBus &&other) noexcept : ptr{other.ptr} { other.ptr = nullptr; }
 
@@ -126,6 +129,35 @@ class DbusCb {
     dbus->storage_->storeInstallUpdatesAutomatically(static_cast<InstallUpdatesAutomatically>(new_value));
     return 0;
   }
+
+  static int OfflineUpdate(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
+    const char *path_string = nullptr;
+    //  path_string is owned by the message and does not need to be freed
+    int res = sd_bus_message_read_basic(m, SD_BUS_TYPE_STRING, &path_string);
+    if (res <= 0) {
+      LOG_ERROR << "Could not read path parameter for OfflineUpdate D-Bus call";
+      return res;
+    }
+    boost::filesystem::path path{path_string};
+    if (!path.is_absolute()) {
+      return sd_bus_error_setf(ret_error, SD_BUS_ERROR_INVALID_ARGS, "OfflineUpdate path must be absolute");
+    }
+
+    boost::system::error_code ec;
+
+    bool is_dir = boost::filesystem::is_directory(path, ec);
+    if (ec.failed()) {
+      return sd_bus_error_setf(ret_error, SD_BUS_ERROR_INVALID_ARGS, "OfflineUpdate unable to access path");
+    }
+    if (!is_dir) {
+      return sd_bus_error_setf(ret_error, SD_BUS_ERROR_INVALID_ARGS, "OfflineUpdate path must be a directory");
+    }
+
+    auto *dbus = static_cast<Dbus *>(userdata);
+    auto callback = dbus->offline_update_callback();
+    callback(path);
+    return sd_bus_reply_method_return(m, "");
+  }
 };
 
 // clang-format off
@@ -137,6 +169,7 @@ static const sd_bus_vtable dbus_vtable[] = {
     SD_BUS_METHOD(Dbus::Consent, "bs", "", DbusCb::Consent, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_PROPERTY(Dbus::ConsentRequired, "s", DbusCb::ConsentRequired, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
     SD_BUS_WRITABLE_PROPERTY(Dbus::InstallUpdatesAutomatically, "i", DbusCb::GetInstallUpdatesAutomatically, DbusCb::SetInstallUpdatesAutomatically, 0, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD(Dbus::OfflineUpdate, "s", "", DbusCb::OfflineUpdate, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_VTABLE_END};
 // clang-format on
 
@@ -258,6 +291,11 @@ void Dbus::SetCheckForUpdatesCallback(std::function<void()> check_for_updates_ca
 void Dbus::SetCancelCallback(std::function<void()> cancel_callback) {
   std::lock_guard<std::mutex> guard{lock_};
   cancel_callback_ = std::move(cancel_callback);
+}
+
+void Dbus::SetOfflineUpdateCallback(std::function<void(const boost::filesystem::path &)> offline_update_callback) {
+  std::lock_guard<std::mutex> guard{lock_};
+  offline_update_callback_ = std::move(offline_update_callback);
 }
 
 std::future<Consent::Outcome> Dbus::GetConsent(const std::vector<Uptane::Target> &targets) {

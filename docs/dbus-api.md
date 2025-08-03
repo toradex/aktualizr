@@ -168,12 +168,22 @@ The cancel D-Bus call is asynchronous and updates will continue until a suitable
 
     busctl call org.uptane.Aktualizr /org/uptane/aktualizr org.uptane.Aktualizr Cancel
 
+## Trigger Offline Updates
+
+OfflineUpdate searches a specific directory for offline update metadata, then validates and installs any update that is present.
+Unlike the normal offline update process, it doesn't require that the metadata appears while Aktualizr is watching.
+The normal Uptane security validation does take place, so the security model is the same as someone writing the contents of that directory to a USB pen drive and plugging it into the device.
+
+    busctl call org.uptane.Aktualizr /org/uptane/aktualizr org.uptane.Aktualizr OfflineUpdate s "/tmp/path/to/update"
+
+'/tmp/path/to/update' will generally be the root of the removable storage containing a takeout image.
+It should contain a directory called 'metadata'.
 
 ## Security Considerations
 
 The key security control is that the D-Bus API doesn’t provide any new rights to install software.
 It is possible to indefinitely block the installation of updates, but this is an explicit right granted by the CRA.
-In the future it will be possible to trigger an offline update over D-Bus, but this will require that a suitable signed update package is already present on the device somewhere, which is equivalent power to being able to plug a USB drive into the device.
+While it is possible to trigger an offline update over D-Bus, this requires that a suitable signed update package is already present on the device somewhere, which is equivalent power to being able to plug a USB drive into the device.
 
 
 ## Future Features

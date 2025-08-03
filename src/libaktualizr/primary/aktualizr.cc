@@ -247,6 +247,15 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
             LOG_INFO << "CheckForUpdates woke Aktualizr thread";
             exit_cond_.check_for_updates_now = false;
             next_online_poll_ = now;
+          } else if (!exit_cond_.check_for_offline_updates.empty()) {
+            LOG_INFO << "Offline Update woke Aktualizr thread";
+#ifdef BUILD_OFFLINE_UPDATES
+            op_update_check_ = CheckUpdatesOffline(exit_cond_.check_for_offline_updates);
+            state_ = UpdateCycleState::kCheckingForUpdatesOffline;
+#else
+            LOG_WARNING << "Offline updates are disabled at compile time";
+#endif
+            exit_cond_.check_for_offline_updates.clear();
           }
         }
         break;
@@ -588,6 +597,11 @@ void Aktualizr::SetDbusInterface(SdBus &&bus) {
   });
 
   dbus_adaptor->SetCancelCallback([this] { Cancel(); });
+  dbus_adaptor->SetOfflineUpdateCallback([this](const boost::filesystem::path &path) {
+    std::lock_guard<std::mutex> lock{exit_cond_.m};
+    exit_cond_.check_for_offline_updates = path;
+    exit_cond_.cv.notify_all();
+  });
 
   consent_ = std::move(dbus_adaptor);
 }
