@@ -29,6 +29,9 @@
 #include <mutex>
 #include <thread>
 
+using std::future_status;
+using namespace std::chrono_literals;
+
 boost::filesystem::path uptane_repos_dir;  // NOLINT
 boost::filesystem::path fake_meta_dir;     // NOLINT
 
@@ -51,6 +54,7 @@ class AktualizrDbus : public testing::Test {
   AktualizrDbus(const AktualizrDbus&) = delete;
   AktualizrDbus& operator=(const AktualizrDbus&) = delete;
   AktualizrDbus& operator=(AktualizrDbus&&) = delete;
+  ~AktualizrDbus() override { sd_bus_unref(client_bus_); }
 
  protected:
   AktualizrDbus() {
@@ -67,7 +71,6 @@ class AktualizrDbus : public testing::Test {
     }
   }
 
-  ~AktualizrDbus() override { sd_bus_unref(client_bus_); }
   SdBus dut_bus_;
   sd_bus* client_bus_{nullptr};
   const char* bus_name_{nullptr};
@@ -145,12 +148,14 @@ TEST_F(AktualizrDbus, CheckForUpdates) {
   ak_future.wait();
 }
 
-static int bus_signal_callback(sd_bus_message* /* *m */, void* userdata, sd_bus_error* /* ret error*/) {
+namespace {
+int bus_signal_callback(sd_bus_message* /* *m */, void* userdata, sd_bus_error* /* ret error*/) {
   int* counter = static_cast<int*>(userdata);
   LOG_DEBUG << "Got property change signal";
   (*counter)++;
   return 0;
 }
+}  // namespace
 
 TEST_F(AktualizrDbus, ConsentRejected) {
   auto http = std::make_shared<HttpFake>(temp_dir_.Path(), "hasupdates", fake_meta_dir);
@@ -221,6 +226,67 @@ TEST_F(AktualizrDbus, ConsentRejected) {
   ak_future.wait();
 }
 
+TEST_F(AktualizrDbus, CancelAtConsentPoint) {
+  auto http = std::make_shared<HttpFake>(temp_dir_.Path(), "hasupdates", fake_meta_dir);
+  Config conf = UptaneTestCommon::makeTestConfig(temp_dir_, http->tls_server);
+  conf.uptane.polling_sec = 600;
+
+  // Require consent
+  auto storage = INvStorage::newStorage(conf.storage);
+  storage->storeInstallUpdatesAutomatically(InstallUpdatesAutomatically::kAsk);
+
+  UptaneTestCommon::TestAktualizr aktualizr(conf, storage, http);
+
+  aktualizr.SetDbusInterface(std::move(dut_bus_));
+
+  aktualizr.Initialize();
+  auto ak_future = aktualizr.RunForever();
+
+  // Wait up to 20s for the consent property to change
+  int counter = 0;
+  int res = sd_bus_match_signal(client_bus_, nullptr, nullptr, Dbus::Path, "org.freedesktop.DBus.Properties",
+                                "PropertiesChanged", bus_signal_callback, &counter);
+  ASSERT_GE(res, 0) << "Adding match signal failed:" << res;
+
+  // pump the system bus to wait for the Consent Property to changed
+  for (int i = 0; (counter == 0) && (i < 200); i++) {
+    int messages = sd_bus_process(client_bus_, nullptr);
+    ASSERT_GE(messages, 0) << "sd_bus_process got error" << -messages;
+    usleep(100'000);
+  }
+  EXPECT_EQ(counter, 1) << "Should have got a notification that the signal has changed";
+
+  // Cancel the update here
+  http->last_manifest.clear();
+  sd_bus_message* reply = nullptr;
+  sd_bus_error err = SD_BUS_ERROR_NULL;
+  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::Cancel, &err, &reply, "");
+  ASSERT_GE(res, 0) << "Call failed";
+  res = sd_bus_message_read(reply, "");
+  sd_bus_message_unref(reply);
+
+  // Note: It isn't clear whether the 'right' behaviour here is to return a
+  // manifest or not. Right now we do send one if we cancel here, so check for
+  // it.
+
+  // Wait for the manifest to come back
+  for (int i = 0; i < 200 && http->last_manifest.empty(); i++) {
+    usleep(100'000);
+  }
+
+  EXPECT_FALSE(http->last_manifest.empty()) << "No Manifest reported after install cancelled";
+
+  // Check the returned manifest
+  Json::Value installation_report = http->last_manifest["signed"]["installation_report"]["report"];
+  EXPECT_EQ(installation_report["result"]["code"].asString(), "OPERATION_CANCELLED")
+      << "The manifest should contain a failure";
+  EXPECT_FALSE(installation_report["result"]["success"].asBool())
+      << "The overall success of the installation should be a failure";
+
+  aktualizr.Shutdown();
+  EXPECT_EQ(ak_future.wait_for(100s), future_status::ready) << "Shutdown failed";
+}
+
 /**
  * Validate the D-Bus interface (\ref Dbus) can receive a CheckForUpdates call
  */
@@ -247,6 +313,86 @@ TEST_F(AktualizrDbus, DbusCheckForUpdates) {
   sd_bus_message_unref(reply);
   ASSERT_EQ(res, 0);
   EXPECT_EQ(taps, 1);
+}
+
+/**
+ * Validate the D-Bus interface can receive a Cancel call
+ */
+TEST_F(AktualizrDbus, DbusCancel) {
+  StorageConfig config_storage;
+  config_storage.path = temp_dir_.Path();
+  auto storage = INvStorage::newStorage(config_storage);
+  Dbus dut(std::move(dut_bus_), storage);
+
+  std::atomic<int> cancels = 0;
+
+  dut.SetCancelCallback([&] { cancels++; });
+
+  EXPECT_EQ(cancels, 0);
+
+  sd_bus_error ret_error = SD_BUS_ERROR_NULL;
+  sd_bus_message* reply = nullptr;
+  int res =
+      sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::Cancel, &ret_error, &reply, "");
+  ASSERT_GE(res, 0) << "Call failed";
+
+  res = sd_bus_message_read(reply, "");
+  sd_bus_message_unref(reply);
+  ASSERT_EQ(res, 0);
+  EXPECT_EQ(cancels, 1);
+}
+
+/**
+ * Validate the D-Bus interface can receive an offline update call
+ */
+TEST_F(AktualizrDbus, DbusOfflineUpdate) {
+  StorageConfig config_storage;
+  config_storage.path = temp_dir_.Path();
+  auto storage = INvStorage::newStorage(config_storage);
+  Dbus dut(std::move(dut_bus_), storage);
+
+  std::atomic<int> calls = 0;
+
+  dut.SetOfflineUpdateCallback([&](const boost::filesystem::path& /*path*/) {
+    // LOG_INFO << "OfflineUpdate path is " << path;
+    calls++;
+  });
+
+  EXPECT_EQ(calls, 0);
+
+  sd_bus_error ret_error = SD_BUS_ERROR_NULL;
+  sd_bus_message* reply = nullptr;
+
+  // Try with an invalid path
+  int res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::OfflineUpdate, &ret_error,
+                               &reply, "s", "");
+  EXPECT_EQ(res, -22) << "Empty path should fail";
+  sd_bus_error_free(&ret_error);
+
+  // try with a relative path
+  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::OfflineUpdate, &ret_error, &reply,
+                           "s", "asdf");
+  EXPECT_EQ(res, -22) << "non-absolute path should fail";
+  sd_bus_error_free(&ret_error);
+
+  // try with an unreadable path
+  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::OfflineUpdate, &ret_error, &reply,
+                           "s", "/root/.ssh");
+  // We expect this to not throw.
+  // EXPECT_EQ(res, -22) << "should fail";
+  sd_bus_error_free(&ret_error);
+
+  TemporaryDirectory tmp_dir;  // Only to get a valid directory path
+  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::OfflineUpdate, &ret_error, &reply,
+                           "s", tmp_dir.Path().c_str());
+  ASSERT_GE(res, 0) << "Call failed " << ret_error.message;
+  sd_bus_error_free(&ret_error);
+
+  res = sd_bus_message_read(reply, "");
+  sd_bus_message_unref(reply);
+
+  ASSERT_EQ(res, 0);
+  EXPECT_EQ(calls, 1);
 }
 
 /**
@@ -354,9 +500,9 @@ TEST_F(AktualizrDbus, DbusRequestConsent) {
   // ..reply twice...
   res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::Consent, &err, &reply, "bs", 1,
                            "repeat");
-  ASSERT_GE(res, 0) << "Call failed";
-  res = sd_bus_message_read(reply, "");
-  sd_bus_message_unref(reply);
+  ASSERT_EQ(res, -13) << "Call should return a failure";
+  ASSERT_STREQ(err.name, "org.freedesktop.DBus.Error.Failed");
+  sd_bus_error_free(&err);
 
   //
   // Note the future resolves the right way
@@ -412,6 +558,9 @@ TEST_F(AktualizrDbus, PendingUpdateCancelled) {
   // Cancel the in-flight request
   dut.PendingUpdateCancelled();
 
+  EXPECT_EQ(consent_response.wait_for(100ms), future_status::ready) << "GetConsent promise should complete";
+  EXPECT_NO_THROW(consent_response.get()) << "Shouldn't throw";  // NOLINT
+
   // pump the system bus to wait for the change notification
   for (int i = 0; (counter == 0) && (i < 100); i++) {
     int messages = sd_bus_process(client_bus_, nullptr);
@@ -434,9 +583,8 @@ TEST_F(AktualizrDbus, PendingUpdateCancelled) {
   sd_bus_message* reply = nullptr;
   res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::Consent, &err, &reply, "bs", 1,
                            "test grant message");
-  ASSERT_GE(res, 0) << "Call failed";
-  res = sd_bus_message_read(reply, "");
-  sd_bus_message_unref(reply);
+  ASSERT_EQ(res, -13) << "Call should fail";
+  sd_bus_error_free(&err);
 }
 
 int main(int argc, char** argv) {

@@ -8,6 +8,7 @@ Last Updated 2025-05-06 by Phil Wise.
 
 * Approve updates (required by the EU Cyber Resilience Act)
 * Trigger an immediate update check (useful if you have an out-of-band wake-up source already)
+* Cancel an in-progress update
 
 Note this is the extent of the API: \aktualizr is not intended to be used as a library.
 If you want to use \aktualizr for a use case that we don't support today, implement the missing features directly in the upstream codebase and enable them via configuration.
@@ -63,12 +64,38 @@ For manual testing, `busctl` can be used:
 
 This is the API that will drive a UI to display "An update is available, do you want to install it?" and handle the user's response.
 
-\aktualizr exposes a read-only property called ‘ConsentRequired’.
-If this is non-empty, then it contains a list of Uptane targets from the director in JSON format.
-Property change notifications are provided, and when this is non-empty, the UI should ask the user if they want to install an update, and may use the contents to provide extra context.
-Online and offline updates can be distinguished by the ‘_type’ field.
+\aktualizr exposes a read-only property with change notifications called ‘ConsentRequired’.
+If this is non-empty, then it contains a list of %Uptane Targets from the director in JSON format, for example:
 
-In the \aktualizr state machine this pause occurs between fetching metadata and downloading an update.
+    {
+        "_type" : "Targets",
+        "targets" :
+        {
+            "primary_firmware.txt" :
+            {
+                "custom" :
+                {
+                    "ecuIdentifiers" :
+                    {
+                        "CA:FE:A6:D2:84:9D" :
+                        {
+                            "hardwareId" : "primary_hw"
+                        }
+                    },
+                    "foo" : "bar",
+                    "targetFormat" : "BINARY",
+                    "uri" : "http://customurl/primary.txt"
+                },
+                "hashes" :
+                {
+                    "sha256" : "ef7dbbe324eab86ab67a198f95b46d7fbf79d5ebf4a4c2c72fc7da9d724aac96",
+                    "sha512" : "74743b8e9588842cdb6d4eb1f851b3b7fc3ef1da3caa81c8a536ce200ae7822c12b02297153dd37aeb9117852e98843d9c7a1fe78901543e200f401bfcb1f111"
+                },
+                "length" : 13
+            }
+        }
+    }
+
 
 For manual testing, this can be read with:
 
@@ -86,6 +113,7 @@ For example:
 
 If the user declines then we fail the update with a new uptane::ResultCode of kConsentRefused.
 This will get posted up with the next put manifest as CONSENT_REFUSED, and fail the update in the Web UI.
+The \aktualizr state machine pauses after fetching Updane metadata but before downloading the update itself.
 While the system is waiting for consent we don’t poll for online updates, but an offline update can cause it to cancel.
 This is the same as today where a offline update can cancel a download operation.
 
@@ -133,18 +161,35 @@ When working interactively with a device, this can be easier than running a shor
 
     busctl call org.uptane.Aktualizr /org/uptane/aktualizr org.uptane.Aktualizr CheckForUpdates
 
+## Cancel an Update
+
+Cancel aborts the current update and returns \aktualizr back to an idle state.
+The cancel D-Bus call is asynchronous and updates will continue until a suitable cancellation point.
+
+    busctl call org.uptane.Aktualizr /org/uptane/aktualizr org.uptane.Aktualizr Cancel
+
+## Trigger Offline Updates
+
+OfflineUpdate searches a specific directory for offline update metadata, then validates and installs any update that is present.
+Unlike the normal offline update process, it doesn't require that the metadata appears while Aktualizr is watching.
+The normal Uptane security validation does take place, so the security model is the same as someone writing the contents of that directory to a USB pen drive and plugging it into the device.
+
+    busctl call org.uptane.Aktualizr /org/uptane/aktualizr org.uptane.Aktualizr OfflineUpdate s "/tmp/path/to/update"
+
+'/tmp/path/to/update' will generally be the root of the removable storage containing a takeout image.
+It should contain a directory called 'metadata'.
+
 ## Security Considerations
 
 The key security control is that the D-Bus API doesn’t provide any new rights to install software.
 It is possible to indefinitely block the installation of updates, but this is an explicit right granted by the CRA.
-In the future it will be possible to trigger an offline update over D-Bus, but this will require that a suitable signed update package is already present on the device somewhere, which is equivalent power to being able to plug a USB drive into the device.
+While it is possible to trigger an offline update over D-Bus, this requires that a suitable signed update package is already present on the device somewhere, which is equivalent power to being able to plug a USB drive into the device.
 
 
 ## Future Features
 
 The following are future features:
 
-  * Using the D-Bus interface to cancel an operation in progress
   * Perform offline updates from a specific directory
   * Disabling (locking) updates
   

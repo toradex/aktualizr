@@ -469,15 +469,14 @@ TEST(Uptane, InstallFakeBad) {
   // Overwrite the file on disk with garbage so that the target verification
   // fails. First read the existing data so we can re-write it later.
   const uint64_t length = download_result.updates[0].length();
-  char content[length];
+  std::vector<char> content(length);
   auto r = std::ifstream(image, std::ios::binary);
-  r.read(content, static_cast<std::streamsize>(length));
+  r.read(content.data(), static_cast<std::streamsize>(length));
   EXPECT_EQ(r.gcount(), length);
   r.close();
   auto w = std::ofstream(image, std::ios::binary | std::ios::ate);
-  char content_bad[length + 1];
-  memset(content_bad, 0, length + 1);
-  w.write(content_bad, 3);
+  std::vector<char> content_bad(length + 1);
+  w.write(content_bad.data(), 3);
   w.close();
 
   result::Install install_result = up->uptaneInstall(download_result.updates);
@@ -486,7 +485,7 @@ TEST(Uptane, InstallFakeBad) {
 
   // Try again with oversized data.
   w = std::ofstream(image, std::ios::binary | std::ios::ate);
-  w.write(content_bad, static_cast<std::streamsize>(length + 1));
+  w.write(content_bad.data(), static_cast<std::streamsize>(length + 1));
   w.close();
 
   install_result = up->uptaneInstall(download_result.updates);
@@ -496,7 +495,7 @@ TEST(Uptane, InstallFakeBad) {
   // Try again with equally long data to make sure the hash check actually gets
   // triggered.
   w = std::ofstream(image, std::ios::binary | std::ios::ate);
-  w.write(content_bad, static_cast<std::streamsize>(length));
+  w.write(content_bad.data(), static_cast<std::streamsize>(length));
   w.close();
 
   install_result = up->uptaneInstall(download_result.updates);
@@ -505,7 +504,7 @@ TEST(Uptane, InstallFakeBad) {
 
   // Try with the real data, but incomplete.
   w = std::ofstream(image, std::ios::binary | std::ios::ate);
-  w.write(content, static_cast<std::streamsize>(length - 1));
+  w.write(content.data(), static_cast<std::streamsize>(length - 1));
   w.close();
 
   install_result = up->uptaneInstall(download_result.updates);
@@ -514,7 +513,7 @@ TEST(Uptane, InstallFakeBad) {
 
   // Restore the original data to the file so that verification succeeds.
   w = std::ofstream(image, std::ios::binary | std::ios::ate);
-  w.write(content, static_cast<std::streamsize>(length));
+  w.write(content.data(), static_cast<std::streamsize>(length));
   w.close();
 
   install_result = up->uptaneInstall(download_result.updates);

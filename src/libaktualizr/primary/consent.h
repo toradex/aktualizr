@@ -1,6 +1,7 @@
 #ifndef CONSENT_H_
 #define CONSENT_H_
 
+#include <json/json.h>
 #include "libaktualizr/types.h"
 
 #include <future>
@@ -10,7 +11,8 @@
 class Consent {
  public:
   struct Outcome {
-    bool granted;
+    bool granted{false};
+    bool was_cancelled{false};
     std::string reason;
   };
   Consent() = default;
@@ -34,6 +36,12 @@ class Consent {
    * an offline update instead.
    */
   virtual void PendingUpdateCancelled() = 0;
+
+  /**
+   * Convert a list of targets into a JSON format suitable to expose via the
+   * D-Bus Consent API.
+   */
+  static Json::Value TargetsToJson(const std::vector<Uptane::Target>& targets);
 };
 
 class TrivialConsent : public Consent {
@@ -41,7 +49,7 @@ class TrivialConsent : public Consent {
   TrivialConsent() = default;
   std::future<Outcome> GetConsent(const std::vector<Uptane::Target>& /* targets */) override {
     std::promise<Outcome> p;
-    p.set_value({true, "Granted Trivially"});
+    p.set_value({true, false, "Granted Trivially"});
     return p.get_future();
   }
 

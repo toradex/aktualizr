@@ -62,6 +62,12 @@ void SecondaryEcuInstallationJob::Install() {
     return;
   }
 
+  if (uptane_client_.flow_control_ != nullptr && uptane_client_.flow_control_->hasAborted()) {
+    LOG_WARNING << "Secondary install cancelled due to FlowControlToken";
+    installation_result_ = data::InstallationResult(data::ResultCode::Numeric::kOperationCancelled, "");
+    return;
+  }
+
   try {
     installation_result_ = secondary_.install(target_, install_info_, uptane_client_.flow_control_);
   } catch (const std::exception& ex) {

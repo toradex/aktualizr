@@ -4,6 +4,7 @@
 #include <future>
 #include <memory>
 
+#include <boost/filesystem/path.hpp>
 #include <boost/signals2.hpp>
 
 #include "libaktualizr/config.h"
@@ -208,7 +209,6 @@ class Aktualizr {
    * actual binary data and does not preclude a re-download if a target matches
    * current metadata.
    * @param target Target object matching the desired target in the storage
-   * @return true if successful
    *
    * @throw SQLException
    * @throw std::runtime_error (error getting targets from database or filesystem)
@@ -317,9 +317,12 @@ class Aktualizr {
    * to finish; then removes all other queued calls.
    * This doesn't reset the `Paused` state, i.e. if the queue was previously
    * paused, it will remain paused, but with an emptied queue.
-   * The call is blocking.
-   *
-   * @throw std::system_error (failure to lock a mutex)
+   * Returns a future that completes when the cancellation is complete.
+   */
+  std::shared_future<void> Cancel();
+
+  /**
+   * A synchronous version of \ref Cancel.
    */
   void Abort();
 
@@ -504,6 +507,7 @@ class Aktualizr {
       return run_mode;
     }
     bool check_for_updates_now{false};
+    boost::filesystem::path check_for_offline_updates{};
   } exit_cond_;
 
   std::shared_ptr<INvStorage> storage_;

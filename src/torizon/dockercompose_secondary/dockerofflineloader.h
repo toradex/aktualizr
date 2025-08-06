@@ -106,7 +106,7 @@ class DockerManifestsCache {
   using DigestToManifestCacheElemMap = std::map<std::string, ManifestCacheElem>;
 
   explicit DockerManifestsCache(boost::filesystem::path manifests_dir, size_t max_manifests = 32)
-      : manifests_dir_(std::move(manifests_dir)), max_manifests_(max_manifests), access_counter_(0) {}
+      : manifests_dir_(std::move(manifests_dir)), max_manifests_(max_manifests) {}
 
   /**
    * Load the manifest (specified by its digest) from the manifest directory
@@ -119,7 +119,7 @@ class DockerManifestsCache {
  protected:
   boost::filesystem::path manifests_dir_;
   size_t max_manifests_;
-  size_t access_counter_;
+  size_t access_counter_{};
   DigestToManifestCacheElemMap manifests_cache_;
 };
 

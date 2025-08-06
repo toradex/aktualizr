@@ -1,3 +1,5 @@
+#include <boost/filesystem/operations.hpp>
+#include <boost/system/error_code.hpp>
 #ifndef BUILD_DBUS
 #error "BUILD_DBUS not defined"
 #endif
@@ -14,6 +16,7 @@
 #include <poll.h>
 #include <systemd/sd-bus.h>
 #include <unistd.h>
+#include <cerrno>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -26,9 +29,11 @@ const char *const Dbus::Path = "/org/uptane/aktualizr";
 const char *const Dbus::Interface = "org.uptane.Aktualizr";
 const char *const Dbus::WellKnown = Dbus::Interface;
 const char *const Dbus::InstallUpdatesAutomatically = "InstallUpdatesAutomatically";
+const char *const Dbus::Cancel = "Cancel";
 const char *const Dbus::CheckForUpdates = "CheckForUpdates";
 const char *const Dbus::Consent = "Consent";
 const char *const Dbus::ConsentRequired = "ConsentRequired";
+const char *const Dbus::OfflineUpdate = "OfflineUpdate";
 
 SdBus::SdBus(SdBus &&other) noexcept : ptr{other.ptr} { other.ptr = nullptr; }
 
@@ -41,20 +46,29 @@ SdBus::~SdBus() {
 
 class DbusCb {
  public:
+  static int Cancel(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
+    auto *dbus = static_cast<Dbus *>(userdata);
+    auto callback = dbus->cancel_callback();
+    if (callback) {
+      callback();
+    } else {
+      LOG_ERROR << "Cancel received but no callback set";
+      return sd_bus_error_set(ret_error, SD_BUS_ERROR_NOT_SUPPORTED, nullptr);
+    }
+    return sd_bus_reply_method_return(m, "");
+  }
   static int CheckForUpdates(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
-    (void)ret_error;
     auto *dbus = static_cast<Dbus *>(userdata);
     auto callback = dbus->check_for_updates_callback();
     if (callback) {
       callback();
     } else {
-      // Maybe return an error over D-Bus here
       LOG_ERROR << "CheckForUpdates received but no callback set";
+      return sd_bus_error_set(ret_error, SD_BUS_ERROR_NOT_SUPPORTED, nullptr);
     }
     return sd_bus_reply_method_return(m, "");
   }
   static int Consent(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
-    (void)ret_error;
     auto *dbus = static_cast<Dbus *>(userdata);
     int granted;
     const char *reason = nullptr;  // Owned by msg, see man sd_bus_message_read_basic
@@ -65,12 +79,13 @@ class DbusCb {
       if (!dbus->current_consent_request_.empty()) {
         Consent::Outcome outcome;
         outcome.granted = granted != 0;
+        outcome.was_cancelled = false;
         outcome.reason = reason;
         dbus->current_consent_promise_.set_value(std::move(outcome));
         dbus->current_consent_request_.clear();
       } else {
         LOG_WARNING << "Consent was granted over D-Bus when no request pending. Ignoring";
-        // TODO: Return an error over D-Bus here?
+        return sd_bus_error_set(ret_error, SD_BUS_ERROR_FAILED, "No consent request is currently outstanding");
       }
     }
 
@@ -100,8 +115,6 @@ class DbusCb {
                                             const char * /*property */, sd_bus_message *value, void *userdata,
                                             sd_bus_error *ret_error) {
     auto *dbus = static_cast<Dbus *>(userdata);
-    (void)dbus;
-    (void)ret_error;
     int new_value = 0;
     int res = sd_bus_message_read_basic(value, SD_BUS_TYPE_INT32, &new_value);
     if (res <= 0) {
@@ -116,16 +129,47 @@ class DbusCb {
     dbus->storage_->storeInstallUpdatesAutomatically(static_cast<InstallUpdatesAutomatically>(new_value));
     return 0;
   }
+
+  static int OfflineUpdate(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
+    const char *path_string = nullptr;
+    //  path_string is owned by the message and does not need to be freed
+    int res = sd_bus_message_read_basic(m, SD_BUS_TYPE_STRING, &path_string);
+    if (res <= 0) {
+      LOG_ERROR << "Could not read path parameter for OfflineUpdate D-Bus call";
+      return res;
+    }
+    boost::filesystem::path path{path_string};
+    if (!path.is_absolute()) {
+      return sd_bus_error_setf(ret_error, SD_BUS_ERROR_INVALID_ARGS, "OfflineUpdate path must be absolute");
+    }
+
+    boost::system::error_code ec;
+
+    bool is_dir = boost::filesystem::is_directory(path, ec);
+    if (ec.failed()) {
+      return sd_bus_error_setf(ret_error, SD_BUS_ERROR_INVALID_ARGS, "OfflineUpdate unable to access path");
+    }
+    if (!is_dir) {
+      return sd_bus_error_setf(ret_error, SD_BUS_ERROR_INVALID_ARGS, "OfflineUpdate path must be a directory");
+    }
+
+    auto *dbus = static_cast<Dbus *>(userdata);
+    auto callback = dbus->offline_update_callback();
+    callback(path);
+    return sd_bus_reply_method_return(m, "");
+  }
 };
 
 // clang-format off
 // NOLINTNEXTLINE Easier to use a C array here
 static const sd_bus_vtable dbus_vtable[] = {
     SD_BUS_VTABLE_START(0),
+    SD_BUS_METHOD(Dbus::Cancel, "", "", DbusCb::Cancel, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD(Dbus::CheckForUpdates, "", "", DbusCb::CheckForUpdates, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD(Dbus::Consent, "bs", "", DbusCb::Consent, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_PROPERTY(Dbus::ConsentRequired, "s", DbusCb::ConsentRequired, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
-    SD_BUS_WRITABLE_PROPERTY(Dbus::InstallUpdatesAutomatically, "i", DbusCb::GetInstallUpdatesAutomatically, DbusCb::SetInstallUpdatesAutomatically, 0, 0),
+    SD_BUS_WRITABLE_PROPERTY(Dbus::InstallUpdatesAutomatically, "i", DbusCb::GetInstallUpdatesAutomatically, DbusCb::SetInstallUpdatesAutomatically, 0, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD(Dbus::OfflineUpdate, "s", "", DbusCb::OfflineUpdate, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_VTABLE_END};
 // clang-format on
 
@@ -178,6 +222,14 @@ void Dbus::Run() {
     }
 
     res = poll(wait_fds.data(), 2, DiffTime(&now, timeout_usec));
+    if (res < 0) {
+      if (errno != EINTR) {
+        LOG_WARNING << "Poll failed:" << errno;
+      } else {
+        LOG_DEBUG << "poll() interrupted by signal";
+      }
+      // In either case just loop round again
+    }
 
     if ((wait_fds[1].revents & POLLIN) != 0) {
       LOG_DEBUG << "D-Bus Thread woken on wait_fds[1]";
@@ -232,7 +284,18 @@ void Dbus::Stop() noexcept {
 }
 
 void Dbus::SetCheckForUpdatesCallback(std::function<void()> check_for_updates_callback) {
+  std::lock_guard<std::mutex> guard{lock_};
   check_for_updates_callback_ = std::move(check_for_updates_callback);
+}
+
+void Dbus::SetCancelCallback(std::function<void()> cancel_callback) {
+  std::lock_guard<std::mutex> guard{lock_};
+  cancel_callback_ = std::move(cancel_callback);
+}
+
+void Dbus::SetOfflineUpdateCallback(std::function<void(const boost::filesystem::path &)> offline_update_callback) {
+  std::lock_guard<std::mutex> guard{lock_};
+  offline_update_callback_ = std::move(offline_update_callback);
 }
 
 std::future<Consent::Outcome> Dbus::GetConsent(const std::vector<Uptane::Target> &targets) {
@@ -243,26 +306,26 @@ std::future<Consent::Outcome> Dbus::GetConsent(const std::vector<Uptane::Target>
   if (install_automatically == InstallUpdatesAutomatically::kProceed) {
     // No need for approval
     std::promise<Outcome> p;
-    p.set_value({true, "User has not requested to approve updates"});
+    p.set_value({true, false, "User has not requested to approve updates"});
     return p.get_future();
   }
 
   std::future<Consent::Outcome> result;
   {
     // Build the new value of the 'Consent' property
-    Json::Value rr{Json::arrayValue};
+    auto formated_targets = TargetsToJson(targets);
 
-    for (const auto &target : targets) {
-      rr.append(target.toDebugJson());
-    }
     // Now lock..
     std::lock_guard<std::mutex> guard{lock_};
 
-    current_consent_request_ = Utils::jsonToStr(rr);
-    // Create a new promise. If the old one was pending, it will be abandoned
-    // when it goes out of scope.
+    // Create a new promise. If there was already a consent request in flight,
+    // then resolve the old one with a 'cancelled' outcome.
     std::promise<Consent::Outcome> promise;
     std::swap(promise, current_consent_promise_);
+    if (!current_consent_request_.empty()) {  // Is the old promise alive?
+      promise.set_value({false, true, "Replaced by new request"});
+    }
+    current_consent_request_ = Utils::jsonToStr(formated_targets);
     result = current_consent_promise_.get_future();
   }
   // Drop lock and wake the D-Bus thread
@@ -277,12 +340,17 @@ void Dbus::PendingUpdateCancelled() {
   {
     std::lock_guard<std::mutex> guard{lock_};
 
+    if (current_consent_request_.empty()) {
+      // Nothing in progress, no-op
+      return;
+    }
     // Clear out the property
     current_consent_request_.clear();
 
-    // Chuck away the old promise
+    // Resolve old promise as cancelled
     std::promise<Consent::Outcome> promise;
     std::swap(promise, current_consent_promise_);
+    promise.set_value({false, true, "Cancelled"});
   }
   // Drop lock and wake the D-Bus thread
   ssize_t res = write(stop_fds_[1], "c", 1);

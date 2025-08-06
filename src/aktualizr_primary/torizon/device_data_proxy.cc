@@ -43,6 +43,7 @@ void DeviceDataProxy::Initialize(uint16_t p) {
 int DeviceDataProxy::ConnectionSetNonblock(int socketfd) {
   int flags;
 
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   if ((flags = fcntl(socketfd, F_GETFL, 0)) == -1) {
     LOG_ERROR << "PROXY: error reading socket flags! [" << strerror(errno) << "]";
     return -1;
@@ -59,6 +60,7 @@ int DeviceDataProxy::ConnectionSetNonblock(int socketfd) {
 int DeviceDataProxy::ConnectionCreate() const {
   int socketfd;
 
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   if ((socketfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
     LOG_ERROR << "PROXY: could not create socket! [" << strerror(errno) << "]";
     return -1;
@@ -152,6 +154,7 @@ void DeviceDataProxy::Start() {
     int listener_socket;
     int timeout = -1;
 
+    // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
     if ((listener_socket = ConnectionCreate()) == -1) {
       status_message = "could not create connection";
       LOG_ERROR << "PROXY: " << status_message << "! Exiting...";
@@ -184,6 +187,7 @@ void DeviceDataProxy::Start() {
       // 1. message in cancel_pipe to finish thread execution
       // 2. connection request in listener_socket
       // 3. timer expired (in case timeout>0)
+      // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
       if ((ret = epoll_wait(epfd, &events, 1, timeout)) < 0) {
         LOG_ERROR << "PROXY: unexpected error when waiting for data!";
         std::this_thread::sleep_for(std::chrono::seconds(3));
@@ -222,7 +226,7 @@ void DeviceDataProxy::Start() {
       }
 
       // receiving data from client
-      else if ((events.events & EPOLLIN) != 0u) {
+      else if ((events.events & EPOLLIN) != 0U) {
         const unsigned int MAX_BUF_LENGTH = 4096;
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays)
         char buffer[MAX_BUF_LENGTH];

@@ -1,5 +1,6 @@
 set(SOURCES aktualizr.cc
             aktualizr_helpers.cc
+            consent.cc
             provisioner.cc
             reportqueue.cc
             secondary_install_job.cc
@@ -158,5 +159,10 @@ if (BUILD_DBUS)
 else(BUILD_DBUS)
     aktualizr_source_file_checks(aktualizr_dbus_test.cc)
 endif(BUILD_DBUS)
+
+add_aktualizr_test(NAME aktualizr_consent
+                   SOURCES aktualizr_consent_test.cc
+                   PROJECT_WORKING_DIRECTORY
+                   LIBRARIES uptane_generator_lib virtual_secondary)
 
 aktualizr_source_file_checks(${SOURCES} ${HEADERS} ${TEST_SOURCES})

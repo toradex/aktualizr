@@ -27,13 +27,13 @@ static const std::string JSON_EXT = ".json";
 static const std::string SHA256_PREFIX = "sha256:";
 
 // Maximum size of a JSON file in a `docker save` tarball.
-static constexpr std::size_t MAX_JSON_FILE_SIZE_BYTES = 256 * 1024;
+static constexpr std::size_t MAX_JSON_FILE_SIZE_BYTES = 256L * 1024;
 
 // Maximum aggregate size of all JSON files in a `docker save` tarball.
-static constexpr std::size_t MAX_TOT_JSON_FILES_SIZE_BYTES = 4 * 1024 * 1024;
+static constexpr std::size_t MAX_TOT_JSON_FILES_SIZE_BYTES = 4L * 1024 * 1024;
 
 // Size of a block for reading input files from tarball.
-static constexpr std::size_t DEFAULT_BLOCK_BUFFER_SIZE_BYTES = 256 * 1024;
+static constexpr std::size_t DEFAULT_BLOCK_BUFFER_SIZE_BYTES = 256L * 1024;
 
 /**
  * Class that allows blocking signals in the current thread.
@@ -370,8 +370,8 @@ bool DockerTarballLoader::loadMetadata() {
   archive_read_free(arch);
 
   // Consume the rest of the file (if any).
-  while (archctrl->read())
-    ;
+  while (archctrl->read() != 0) {
+  }
 
   // Save original digest so we can check it upon loading the images.
   org_tarball_digest_ = archctrl->getHexDigest();
@@ -557,7 +557,7 @@ bool DockerTarballLoader::loadImages() {
   static constexpr const size_t num_blocks_mask = num_blocks - 1U;
 
   struct Block {
-    std::array<uint8_t, 16 * 1024> buf{};
+    std::array<uint8_t, 16L * 1024> buf{};
     size_t len{0};
     bool used{false};
     Block() = default;
