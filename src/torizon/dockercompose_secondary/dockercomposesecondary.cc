@@ -14,8 +14,6 @@ using std::stringstream;
 
 namespace Primary {
 
-constexpr const char* const DockerComposeSecondaryConfig::Type;
-
 DockerComposeSecondaryConfig::DockerComposeSecondaryConfig(const Json::Value& json_config)
     : ManagedSecondaryConfig(Type) {
   partial_verifying = json_config["partial_verifying"].asBool();
