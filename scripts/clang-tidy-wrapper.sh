@@ -13,4 +13,5 @@ if [[ ! -e "${CMAKE_BINARY_DIR}/compile_commands.json" ]]; then
 fi
 
 ${CLANG_TIDY} -quiet -header-filter="\(\(${CMAKE_SOURCE_DIR}|\\.\\.\)/src/|include/libaktualizr/\).*" \
-  --extra-arg-before=-Wno-unknown-warning-option -format-style=file -p "${CMAKE_BINARY_DIR}" "${FILE}"
+	      --extra-arg="-DCLANG_TIDY" --extra-arg-before=-Wno-unknown-warning-option \
+	      --format-style=file -p "${CMAKE_BINARY_DIR}" "${FILE}"

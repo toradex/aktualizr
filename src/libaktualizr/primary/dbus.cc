@@ -1,7 +1,7 @@
 #include <boost/filesystem/operations.hpp>
 #include <boost/system/error_code.hpp>
-#ifndef BUILD_DBUS
-#error "BUILD_DBUS not defined"
+#if !(defined(BUILD_DBUS) || defined(CLANG_TIDY))
+#error "BUILD_DBUS or CLANG_TIDY must be defined"
 #endif
 
 #include "primary/dbus.h"
@@ -170,7 +170,9 @@ static const sd_bus_vtable dbus_vtable[] = {
     SD_BUS_PROPERTY(Dbus::ConsentRequired, "s", DbusCb::ConsentRequired, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
     SD_BUS_WRITABLE_PROPERTY(Dbus::InstallUpdatesAutomatically, "i", DbusCb::GetInstallUpdatesAutomatically, DbusCb::SetInstallUpdatesAutomatically, 0, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD(Dbus::OfflineUpdate, "s", "", DbusCb::OfflineUpdate, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_VTABLE_END};
+    // NOLINTNEXTLINE(clang-diagnostic-missing-field-initializers)
+    SD_BUS_VTABLE_END
+};
 // clang-format on
 
 Dbus::Dbus(SdBus &&bus, std::shared_ptr<INvStorage> storage) : bus_{std::move(bus)}, storage_{std::move(storage)} {
@@ -213,6 +215,9 @@ void Dbus::Run() {
 
     uint64_t timeout_usec;  // absolute time
     res = sd_bus_get_timeout(bus_.ptr, &timeout_usec);
+    if (res < 0) {
+      throw std::system_error(-res, std::system_category(), "sd_bus_get_timeout");
+    }
     // convert an absolute timeout relative to CLOCK_MONOTONIC to a relative
     // number of ms
     struct timespec now {};
