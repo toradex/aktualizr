@@ -266,7 +266,7 @@ void DirectorRepository::updateMetaOffUpd(INvStorage& storage, const OfflineUpda
   // Update Director Offline Updates(Targets) Metadata
   // PURE-2 step 4
   boost::filesystem::path offline_target_file;
-  Version offline_snapshot_version = Version(-1);
+  auto offline_snapshot_version = Version(-1);
   std::string offline_target_name;
   for (const auto& role_name : offline_snapshot_.role_names()) {
     std::string filename = role_name + ".json";
@@ -300,7 +300,7 @@ void DirectorRepository::updateMetaOffUpd(INvStorage& storage, const OfflineUpda
   fetcher.fetchLatestRole(&director_offline_targets, kMaxDirectorTargetsSize, RepositoryType::Director(),
                           offline_target_role);
 
-  Version offline_targets_version = Version(Utils::parseJSON(director_offline_targets)["signed"]["version"].asInt());
+  auto offline_targets_version = Version(Utils::parseJSON(director_offline_targets)["signed"]["version"].asInt());
   if (offline_targets_version != offline_snapshot_version) {
     throw Uptane::VersionMismatch(RepositoryType::Director(), Uptane::Role::OFFLINEUPDATES);
   }

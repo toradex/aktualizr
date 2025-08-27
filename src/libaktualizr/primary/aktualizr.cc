@@ -519,7 +519,7 @@ std::future<result::Install> Aktualizr::Install(const std::vector<Uptane::Target
           data::InstallationResult(false, data::ResultCode::Numeric::kOperationCancelled, "Operation Cancelled"), {}));
 }
 
-void Aktualizr::StoreInstallationFailure(data::InstallationResult result) {
+void Aktualizr::StoreInstallationFailure(const data::InstallationResult &result) {
   std::function<void()> task([this, result] { return uptane_client_->storeInstallationFailure(result); });
   api_queue_->enqueue(std::move(task));
 }
