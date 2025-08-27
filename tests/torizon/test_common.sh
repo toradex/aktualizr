@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# shellcheck disable=SC2034
 SHARED_VARS=(
   "SECONDARY_INTERFACE_MAJOR"
   "SECONDARY_INTERFACE_MINOR"
@@ -11,7 +12,7 @@ SHARED_VARS=(
 terminate_with_signal() {
     local signame="${1:?No signal name or number provided}"
     echo "Performing a suicide with signal $signame"
-    kill -$signame $$
+    kill -"${signame}" $$
 }
 
 exit_with_code() {
