@@ -261,7 +261,7 @@ constexpr int Dbus::DiffTime(struct timespec *now, uint64_t systemd_abs_timeout)
   }
   // Round the systemd time up and and now down. We might sleep 2ms longer
   // than desired, but that is OK for our use cases
-  int64_t abs_timeout_ms = (systemd_abs_timeout + 999U) / 1000U;
+  auto abs_timeout_ms = static_cast<int64_t>((systemd_abs_timeout + 999U) / 1000U);
 
   int64_t now_ms = now->tv_sec * 1000 + now->tv_nsec / 1000000;
 

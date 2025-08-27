@@ -61,6 +61,7 @@ P11SlotsWrapper::~P11SlotsWrapper() {
   }
 }
 
+// NOLINTBEGIN(clang-diagnostic-deprecated-declarations)
 P11Engine::P11Engine(boost::filesystem::path module_path, std::string pass)
     : module_path_(std::move(module_path)), pass_{std::move(pass)}, ctx_(module_path_), wslots_(ctx_.get()) {
   if (module_path_.empty()) {
@@ -79,7 +80,7 @@ P11Engine::P11Engine(boost::filesystem::path module_path, std::string pass)
   LOG_DEBUG << "Slot token model.......: " << slot->token->model;
   LOG_DEBUG << "Slot token serialnr....: " << slot->token->serialnr;
 
-  uri_prefix_ = std::string("pkcs11:serial=") + slot->token->serialnr + ";pin-value=" + pass + ";id=%";
+  uri_prefix_ = std::string("pkcs11:serial=") + slot->token->serialnr + ";pin-value=" + pass_ + ";id=%";
 
   ENGINE_load_builtin_engines();
   ENGINE* engine = ENGINE_by_id("dynamic");
@@ -136,6 +137,7 @@ P11Engine::~P11Engine() {
     ENGINE_cleanup();  // for openssl < 1.1
   }
 }
+// NOLINTEND(clang-diagnostic-deprecated-declarations)
 
 // Hack for clang-tidy
 #ifndef PKCS11_ENGINE_PATH

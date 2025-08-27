@@ -35,7 +35,7 @@ class SQLiteStatement {
  public:
   template <typename... Types>
   SQLiteStatement(sqlite3* db, const std::string& zSql, const Types&... args)
-      : db_(db), stmt_(nullptr, sqlite3_finalize), bind_cnt_(1) {
+      : db_(db), stmt_(nullptr, sqlite3_finalize) {
     sqlite3_stmt* statement;
 
     if (sqlite3_prepare_v2(db_, zSql.c_str(), -1, &statement, nullptr) != SQLITE_OK) {
@@ -120,7 +120,7 @@ class SQLiteStatement {
 
   sqlite3* db_;
   std::unique_ptr<sqlite3_stmt, int (*)(sqlite3_stmt*)> stmt_;
-  int bind_cnt_;
+  int bind_cnt_{1};
   // copies of data that need to persist for the object duration
   // (avoid vector because of resizing issues)
   std::list<std::string> owned_data_;

@@ -749,7 +749,7 @@ Hash Hash::generate(Type type, std::istream &source, ssize_t *nread) {
   }
 
   // Process file in blocks.
-  using BufferType = std::array<uint8_t, 64 * 1024>;
+  using BufferType = std::array<uint8_t, 64UL * 1024>;
   auto buffer = std_::make_unique<BufferType>();
 
   // Determine the digest of the whole stream.
