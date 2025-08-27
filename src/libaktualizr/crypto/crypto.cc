@@ -350,7 +350,7 @@ std::string Crypto::extractSubjectCN(const std::string &cert) {
   if (len < 0) {
     throw std::runtime_error("Could not get CN from certificate");
   }
-  boost::scoped_array<char> buf(new char[len + 1]);
+  boost::scoped_array<char> buf(new char[static_cast<size_t>(len) + 1]);
   X509_NAME_get_text_by_NID(X509_get_subject_name(x.get()), NID_commonName, buf.get(), len + 1);
   return std::string(buf.get());
 }
@@ -816,7 +816,7 @@ std::string Hash::shortTag(const std::vector<Hash> &hashes) {
 
 class CryptoOpenSSlInit {
  public:
-  // NOLINTNEXTLINE(*-use-equals-default)
+  // NOLINTNEXTLINE(hicpp-use-equals-default,modernize-use-equals-default)
   CryptoOpenSSlInit() {
 #if !AKTUALIZR_OPENSSL_PRE_3
     OSSL_PROVIDER *legacy = OSSL_PROVIDER_try_load(nullptr, "legacy", 1);

@@ -494,7 +494,7 @@ std::future<result::Install> Aktualizr::Install(const std::vector<Uptane::Target
   return api_queue_->enqueue(std::move(task));
 }
 
-void Aktualizr::StoreInstallationFailure(data::InstallationResult result) {
+void Aktualizr::StoreInstallationFailure(const data::InstallationResult &result) {
   std::function<void()> task([this, result] { return uptane_client_->storeInstallationFailure(result); });
   api_queue_->enqueue(std::move(task));
 }

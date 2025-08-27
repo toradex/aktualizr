@@ -460,7 +460,7 @@ class Aktualizr {
   /**
    * Record a installation failure in the manifest we send.
    */
-  void StoreInstallationFailure(data::InstallationResult result);
+  void StoreInstallationFailure(const data::InstallationResult& result);
 
   UpdateCycleState state_{UpdateCycleState::kUnprovisioned};
   // These hold a running operation for the current state
