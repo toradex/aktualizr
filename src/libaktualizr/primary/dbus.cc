@@ -1,5 +1,5 @@
-#ifndef BUILD_DBUS
-#error "BUILD_DBUS not defined"
+#if !(defined(BUILD_DBUS) || defined(CLANG_TIDY))
+#error "BUILD_DBUS or CLANG_TIDY must be defined"
 #endif
 
 #include "primary/dbus.h"
@@ -126,6 +126,7 @@ static const sd_bus_vtable dbus_vtable[] = {
     SD_BUS_METHOD(Dbus::Consent, "bs", "", DbusCb::Consent, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_PROPERTY(Dbus::ConsentRequired, "s", DbusCb::ConsentRequired, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
     SD_BUS_WRITABLE_PROPERTY(Dbus::InstallUpdatesAutomatically, "i", DbusCb::GetInstallUpdatesAutomatically, DbusCb::SetInstallUpdatesAutomatically, 0, 0),
+    // NOLINTNEXTLINE(clang-diagnostic-missing-field-initializers)
     SD_BUS_VTABLE_END};
 // clang-format on
 
@@ -169,6 +170,9 @@ void Dbus::Run() {
 
     uint64_t timeout_usec;  // absolute time
     res = sd_bus_get_timeout(bus_.ptr, &timeout_usec);
+    if (res < 0) {
+      throw std::system_error(-res, std::system_category(), "sd_bus_get_timeout");
+    }
     // convert an absolute timeout relative to CLOCK_MONOTONIC to a relative
     // number of ms
     struct timespec now {};
@@ -177,7 +181,8 @@ void Dbus::Run() {
       throw std::system_error(errno, std::system_category(), "clock_gettime failed");
     }
 
-    res = poll(wait_fds.data(), 2, DiffTime(&now, timeout_usec));
+    // TODO: Should we handle poll() errors?
+    poll(wait_fds.data(), 2, DiffTime(&now, timeout_usec));
 
     if ((wait_fds[1].revents & POLLIN) != 0) {
       LOG_DEBUG << "D-Bus Thread woken on wait_fds[1]";
