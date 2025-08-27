@@ -1,7 +1,8 @@
 #!/bin/bash
 
-LOCATION=$(dirname ${BASH_SOURCE})
+LOCATION=$(dirname "${BASH_SOURCE[0]}")
 
+# shellcheck disable=SC1090,SC1091
 source "${LOCATION}/test_common.sh"
 
 if [ "$1" != "complete-install" ]; then

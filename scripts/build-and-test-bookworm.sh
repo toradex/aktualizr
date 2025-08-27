@@ -47,7 +47,7 @@ tst_blacklist_="${TST_BLACKLIST-${tst_blacklist_}}"
 tmpdir() {
     export TMPDIR="${1}"
     echo "Setting temp directory to: ${TMPDIR}"
-    mkdir -p ${TMPDIR}
+    mkdir -p "${TMPDIR}"
 }
 
 # This expects to find the checked out source code in ./source
@@ -94,6 +94,7 @@ if [ "${run_tests_}" = "1" ]; then
 
     if [ -n "${tst_blacklist_}" ]; then
         # Translate space-separated list into a regex.
+	# shellcheck disable=SC2086
         tst_blacklist_=$(echo ${tst_blacklist_} | \
                              sed -e 's/[[:space:]]\+/|/g' \
                                  -e 's/^/(/' \
@@ -108,7 +109,7 @@ fi
 if [ "${run_clang_tidy_}" = "1" ]; then
     cd "${BLD_DIR}"
     echo -e "\n== Make 'clang-tidy' ==\n"
-    time ninja -v clang-tidy -k 0 -j $(nproc)
+    time ninja -v clang-tidy -k 0 -j "$(nproc)"
 fi
 
 echo -e "\n== DONE! ==\n"
