@@ -8,8 +8,8 @@
 # - RUN_TESTS: set to "1" to run the tests.
 # - RUN_CHECK_FORMAT: set to "1" to run "check-format".
 # - RUN_CLANG_TIDY:  set to "1" to run "clang-tidy".
-# - TST_BLACKLIST: blacklisted tests (regex), e.g.
-#                  "test_ostree_custom_uri test_misc_ostree_update"
+# - TEST_BLACKLIST: space/newline separated list of tests not to
+#   run, e.g. "test_ostree_custom_uri test_misc_ostree_update".
 #
 # Other useful variables (understood by ctest):
 #
@@ -18,37 +18,13 @@
 
 set -euo pipefail
 
-# TODO: Fix the errors with these tests.
-tst_blacklist_="
-  test_aktualizr
-  test_aktualizr_update_lock
-  test_uptane
-  test_uptane_delegation
-  test_uptane_network
-  test_uptane_cancellation
-  test_uptane_update_failure
-  test_c_api
-  aktualizr-option-version
-  test_command_runner
-  test-help-with-other-options
-  test-help-with-nonexistent-options
-  test_ip_secondary
-  test_ip_secondary_rotation
-  test_customrepo_failure
-  test_ip_secondary_ostree
-  test_treehub_failure
-  test_misc_ostree_update
-  test_ostree_custom_uri
-  test_install_aktualizr_and_update
-"
-
 gen_buildsys_="${GEN_BUILDSYS:-1}"
 bld_default_="${BLD_DEFAULT:-1}"
 bld_tests_="${BLD_TESTS:-1}"
 run_tests_="${RUN_TESTS:-1}"
 run_check_format_="${RUN_CHECK_FORMAT:-1}"
 run_clang_tidy_="${RUN_CLANG_TIDY:-1}"
-tst_blacklist_="${TST_BLACKLIST-${tst_blacklist_}}"
+tst_blacklist_="${TEST_BLACKLIST-}"
 
 tmpdir() {
     export TMPDIR="${1}"
@@ -110,7 +86,7 @@ if [ "${run_tests_}" = "1" ]; then
 
     if [ -n "${tst_blacklist_}" ]; then
         # Translate space-separated list into a regex.
-	# shellcheck disable=SC2086
+        # shellcheck disable=SC2086
         tst_blacklist_=$(echo ${tst_blacklist_} | \
                              sed -e 's/[[:space:]]\+/|/g' \
                                  -e 's/^/(/' \
