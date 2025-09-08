@@ -494,18 +494,31 @@ std::string OstreeManager::getCurrentHash() const {
   return ostree_deployment_get_csum(deployment);
 }
 
-Uptane::Target OstreeManager::getCurrent() const {
-  const std::string current_hash = getCurrentHash();
-  boost::optional<Uptane::Target> current_version;
-  // This may appear Primary-specific, but since Secondaries only know about
-  // themselves, this actually works just fine for them, too.
-  storage_->loadPrimaryInstalledVersions(&current_version, nullptr, nullptr);
+bool OstreeManager::hasOstreeDiverged() const {
+    return !getCurrentVersion().has_value();
+}
 
-  if (!!current_version && current_version->sha256Hash() == current_hash) {
-    return *current_version;
+boost::optional<Uptane::Target> OstreeManager::getCurrentVersion() const {
+    const std::string current_hash = getCurrentHash();
+    boost::optional<Uptane::Target> current_version;
+    // This may appear Primary-specific, but since Secondaries only know about
+    // themselves, this actually works just fine for them, too.
+    storage_->loadPrimaryInstalledVersions(&current_version, nullptr, nullptr);
+
+    if (current_version && current_version->sha256Hash() == current_hash) {
+        return current_version;
+    }
+    return {};
+}
+
+Uptane::Target OstreeManager::getCurrent() const {
+  auto current_version = getCurrentVersion();
+  if (current_version) {
+      return *current_version;
   }
 
   LOG_ERROR << "Current versions in storage and reported by OSTree do not match";
+  const std::string current_hash = getCurrentHash();
 
   // Look into installation log to find a possible candidate. Again, despite the
   // name, this will work for Secondaries as well.
