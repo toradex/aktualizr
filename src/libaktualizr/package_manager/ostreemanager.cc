@@ -494,6 +494,12 @@ std::string OstreeManager::getCurrentHash() const {
   return ostree_deployment_get_csum(deployment);
 }
 
+bool OstreeManager::hasOstreeDiverged() const {
+  boost::optional<Uptane::Target> current_version;
+  storage_->loadPrimaryInstalledVersions(&current_version, nullptr, nullptr);
+  return !current_version || (current_version->sha256Hash() != getCurrentHash());
+}
+
 Uptane::Target OstreeManager::getCurrent() const {
   const std::string current_hash = getCurrentHash();
   boost::optional<Uptane::Target> current_version;
