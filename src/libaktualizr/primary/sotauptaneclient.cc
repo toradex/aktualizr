@@ -635,7 +635,14 @@ void SotaUptaneClient::getNewTargets(std::vector<Uptane::Target> *new_targets, u
         LOG_WARNING << "Current version for ECU ID: " << ecu_serial << " is unknown";
         is_new = true;
       } else if (current_version->MatchTarget(target)) {
-        // Do nothing; target is already installed.
+        // Check OSTree to make sure storage is up to date
+        if (primary_ecu_serial == ecu_serial && target.IsOstree() && config.pacman.type == PACKAGE_MANAGER_OSTREE) {
+          if (package_manager_->hasOstreeDiverged()) {
+            LOG_WARNING << "Current storage version differs from deployed commit; treating as new target";
+            is_new = true;
+          }
+        }
+        // else: Do nothing; target is already installed.
       } else if (current_version->filename() == target.filename()) {
         // TODO: [OFFUPD] Is this condition okay for offline-updates?
         LOG_ERROR << "Director Target filename matches currently installed version, but content differs!";
