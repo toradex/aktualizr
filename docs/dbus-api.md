@@ -4,18 +4,18 @@ Last Updated 2025-05-06 by Phil Wise.
 
 ## Introduction
 
-\aktualizr provides an API over D-Bus to allow users to:
+Aktualizr provides an API over D-Bus to allow users to:
 
 * Approve updates (required by the EU Cyber Resilience Act)
 * Trigger an immediate update check (useful if you have an out-of-band wake-up source already)
 * Cancel an in-progress update
 
-Note this is the extent of the API: \aktualizr is not intended to be used as a library.
-If you want to use \aktualizr for a use case that we don't support today, implement the missing features directly in the upstream codebase and enable them via configuration.
+Note this is the extent of the API: Aktualizr is not intended to be used as a library.
+If you want to use Aktualizr for a use case that we don't support today, implement the missing features directly in the upstream codebase and enable them via configuration.
 We're a friendly bunch!
 
 The EU Cyber Resilience Act mandates user consent when installing updates.
-\aktualizr implements this by pausing the update state machine and waiting for confirmation over D-Bus.
+Aktualizr implements this by pausing the update state machine and waiting for confirmation over D-Bus.
 
 The D-Bus API is enabled at build time via the `BUILD_DBUS` flag.
 It uses the systemd sdbus library.
@@ -24,7 +24,7 @@ It uses the systemd sdbus library.
 
 By default devices install updates automatically.
 A user who wants to individually approve each update that is installed will go into the settings section of the device and clear the 'Automatically install updates’ property.
-The device manufacturer will implement this UI using the API that \aktualizr provides, which is a settable ‘InstallUpdatesAutomatically’ D-Bus Property that takes the following values:
+The device manufacturer will implement this UI using the API that Aktualizr provides, which is a settable ‘InstallUpdatesAutomatically’ D-Bus Property that takes the following values:
 
 <table>
 <caption>InstallUpdatesAutomatically values</caption>
@@ -45,13 +45,13 @@ The device manufacturer will implement this UI using the API that \aktualizr pro
 </tr>
 </table>
 
-Customers who want finer-grained policies can implement these by automatically responding to \aktualizr’s consent requests without prompting the user.
+Customers who want finer-grained policies can implement these by automatically responding to Aktualizr’s consent requests without prompting the user.
 In the future we can add more options like ‘apply pure security updates automatically’, which would remain backwards compatible with UIs that only know about the 2 initial options.
 
-This property is stored in \aktualizr’s non-volatile sqlite database.
+This property is stored in Aktualizr’s non-volatile sqlite database.
 There won’t be a way to change the default in the initial version.
-The UI should not try and store its own copy of this state, and instead query \aktualizr as needed.
-If \aktualizr starts up and finds that the InstallUpdatesAutomatically property is set in the sqlite database but D-Bus isn’t compiled in, then it will ignore the property and continue with a warning in order to avoid getting stuck in an un-updatable state.
+The UI should not try and store its own copy of this state, and instead query Aktualizr as needed.
+If Aktualizr starts up and finds that the InstallUpdatesAutomatically property is set in the sqlite database but D-Bus isn’t compiled in, then it will ignore the property and continue with a warning in order to avoid getting stuck in an un-updatable state.
 
 Users should directly consume this D-Bus API using whatever bindings their language provides.
 For manual testing, `busctl` can be used:
@@ -60,12 +60,12 @@ For manual testing, `busctl` can be used:
     busctl set-property org.uptane.Aktualizr /org/uptane/aktualizr org.uptane.Aktualizr InstallUpdatesAutomatically i 1
 
 
-## %Consent API
+## Consent API
 
 This is the API that will drive a UI to display "An update is available, do you want to install it?" and handle the user's response.
 
-\aktualizr exposes a read-only property with change notifications called ‘ConsentRequired’.
-If this is non-empty, then it contains a list of %Uptane Targets from the director in JSON format, for example:
+Aktualizr exposes a read-only property with change notifications called ‘ConsentRequired’.
+If this is non-empty, then it contains a list of Uptane Targets from the director in JSON format, for example:
 
     {
         "_type" : "Targets",
@@ -101,7 +101,7 @@ For manual testing, this can be read with:
 
     busctl get-property org.uptane.Aktualizr /org/uptane/aktualizr org.uptane.Aktualizr ConsentRequired
 
-The user’s response should be provided back to \aktualizr via a method call called ‘Consent’ with the following parameters:
+The user’s response should be provided back to Aktualizr via a method call called ‘Consent’ with the following parameters:
 
   * boolean granted – If the installation should continue
   * string reason – A human-readable description
@@ -113,14 +113,14 @@ For example:
 
 If the user declines then we fail the update with a new uptane::ResultCode of kConsentRefused.
 This will get posted up with the next put manifest as CONSENT_REFUSED, and fail the update in the Web UI.
-The \aktualizr state machine pauses after fetching Updane metadata but before downloading the update itself.
+The Aktualizr state machine pauses after fetching Updane metadata but before downloading the update itself.
 While the system is waiting for consent we don’t poll for online updates, but an offline update can cause it to cancel.
 This is the same as today where a offline update can cancel a download operation.
 
 During this process, events are send to the server using the reliable 'ReportQueue' transport at 2 points:
 
 <table>
-<caption>Events sent from \aktualizr to the Update server</caption>
+<caption>Events sent from Aktualizr to the Update server</caption>
 <tr>
   <th>Event Name</th>
   <th>Fields</th>
@@ -147,7 +147,7 @@ During this process, events are send to the server using the reliable 'ReportQue
     When consent is given or refused.
     If ‘granted’ is true, then installation is proceeding.
     Cancellations via offline updates are reported as granted:false reason:”Cancelled by offline update” 
-    Trivial cases are reported with a reason like “User has not requested consent” or “D-Bus not complied into \aktualizr”
+    Trivial cases are reported with a reason like “User has not requested consent” or “D-Bus not complied into Aktualizr”
   </td>
 </tr>
 </table>
@@ -163,7 +163,7 @@ When working interactively with a device, this can be easier than running a shor
 
 ## Cancel an Update
 
-Cancel aborts the current update and returns \aktualizr back to an idle state.
+Cancel aborts the current update and returns Aktualizr back to an idle state.
 The cancel D-Bus call is asynchronous and updates will continue until a suitable cancellation point.
 
     busctl call org.uptane.Aktualizr /org/uptane/aktualizr org.uptane.Aktualizr Cancel
