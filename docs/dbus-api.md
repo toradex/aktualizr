@@ -30,17 +30,14 @@ The device manufacturer will implement this UI using the API that Aktualizr prov
 <caption>InstallUpdatesAutomatically values</caption>
 <tr>
   <th>Value over D-Bus</th>
-  <th>ConsentRequirement enum</th>
   <th>Meaning</th>
 </tr>
 <tr>
   <td>0</td>
-  <td>InstallUpdatesAutomatically::kProceed</td>
   <td>(default) Updates proceed automatically</td>
 </tr>
 <tr>
  <td>1</td>
- <td>InstallUpdatesAutomatically::kAsk</td>
  <td>Updates require consent to continue.</td>
 </tr>
 </table>
@@ -110,7 +107,7 @@ For example:
     # Install whatever ConsentRequired is asking about
     busctl call org.uptane.Aktualizr /org/uptane/aktualizr org.uptane.Aktualizr Consent bs true "All good"
 
-If the user declines then we fail the update with a new uptane::ResultCode of kConsentRefused.
+If the user declines, the update fails with a result code indicating that condition.
 This will get posted up with the next put manifest as `CONSENT_REFUSED`, and fail the update in the Web UI.
 The Aktualizr state machine pauses after fetching Updane metadata but before downloading the update itself.
 While the system is waiting for consent we don't poll for online updates, but an offline update can cause it to cancel.
