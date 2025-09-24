@@ -26,21 +26,10 @@ By default devices install updates automatically.
 A user who wants to individually approve each update that is installed will go into the settings section of the device and clear the "Automatically install updates" property.
 The device manufacturer will implement this UI using the API that Aktualizr provides, which is a settable `InstallUpdatesAutomatically` D-Bus Property that takes the following values:
 
-<table>
-<caption>InstallUpdatesAutomatically values</caption>
-<tr>
-  <th>Value over D-Bus</th>
-  <th>Meaning</th>
-</tr>
-<tr>
-  <td>0</td>
-  <td>(default) Updates proceed automatically</td>
-</tr>
-<tr>
- <td>1</td>
- <td>Updates require consent to continue.</td>
-</tr>
-</table>
+| Value over D-Bus | Meaning |
+|:---|:---|
+| 0 | (default) Updates proceed automatically. |
+| 1 | Updates require consent to continue. |
 
 Customers who want finer-grained policies can implement these by automatically responding to Aktualizr's consent requests without prompting the user.
 In the future we can add more options like "apply pure security updates automatically", which would remain backwards compatible with UIs that only know about the 2 initial options.
@@ -99,8 +88,8 @@ For manual testing, this can be read with:
 
 The user's response should be provided back to Aktualizr via a method call called `Consent` with the following parameters:
 
-  * boolean `granted`: If the installation should continue
-  * string `reason`: A human-readable description
+  * `granted` (boolean): If the installation should continue
+  * `reason` (string): A human-readable description
 
 For example:
 
@@ -115,38 +104,10 @@ This is the same as today where a offline update can cancel a download operation
 
 During this process, events are send to the server using the reliable `ReportQueue` transport at 2 points:
 
-<table>
-<caption>Events sent from Aktualizr to the Update server</caption>
-<tr>
-  <th>Event Name</th>
-  <th>Fields</th>
-  <th>Send When...</th></tr>
-<tr>
-  <td>AwaitingConsent</td>
-  <td>
-
-  * correlationId
-
-  </td>
-  <td>Installation is waiting for consent. This is sent in trivial cases too.</td>
-</tr>
-<tr>
-  <td>ConsentOutcome</td>
-  <td>
-
-  * correlationId
-  * granted (boolean)
-  * reason (string)
-
-  </td>
-  <td>
-    When consent is given or refused.
-    If `granted` is true, then installation is proceeding.
-    Cancellations via offline updates are reported as granted:false reason:"Cancelled by offline update"
-    Trivial cases are reported with a reason like "User has not requested consent" or "D-Bus not complied into Aktualizr"
-  </td>
-</tr>
-</table>
+| Event Name | Fields | Send When... |
+|:--|:--|:--|
+| `AwaitingConsent` | `correlationId` | **Installation is waiting for consent**<br/>This is sent in trivial cases too. |
+| `ConsentOutcome` | `correlationId`,<br/>`granted`&nbsp;(boolean),<br/>`reason` (string) | **Consent is given or refused**<br/>If `granted` is true, then installation is proceeding. Cancellations via offline updates are reported as `granted`:false and `reason`:"Cancelled by offline update". Trivial cases are reported with a reason like "User has not requested consent" or "D-Bus not complied into Aktualizr". |
 
 ## Check For Updates
 
@@ -186,7 +147,6 @@ While it is possible to trigger an offline update over D-Bus, this requires that
 
 The following are future features:
 
-  * Perform offline updates from a specific directory
   * Disabling (locking) updates
 
 ## Testing Approach
