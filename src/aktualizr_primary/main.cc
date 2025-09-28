@@ -31,7 +31,7 @@
 
 namespace bpo = boost::program_options;
 
-void checkInfoOptions(const bpo::options_description &description, const bpo::variables_map &vm) {
+static void checkInfoOptions(const bpo::options_description &description, const bpo::variables_map &vm) {
   if (vm.count("help") != 0) {
     std::cout << description << '\n';
     exit(EXIT_SUCCESS);
@@ -42,7 +42,7 @@ void checkInfoOptions(const bpo::options_description &description, const bpo::va
   }
 }
 
-bpo::variables_map parseOptions(int argc, char **argv) {
+static bpo::variables_map parseOptions(int argc, char **argv) {
   bpo::options_description description(PROGRAM_NAME " command line options");
   // clang-format off
   // Try to keep these options in the same order as Config::updateFromCommandLine().
@@ -109,7 +109,7 @@ bpo::variables_map parseOptions(int argc, char **argv) {
 }
 
 #ifndef TORIZON
-void processEvent(const std::shared_ptr<event::BaseEvent> &event) {
+static void processEvent(const std::shared_ptr<event::BaseEvent> &event) {
   if (event->isTypeOf<event::DownloadProgressReport>() || event->variant == "UpdateCheckComplete") {
     // Do nothing; libaktualizr already logs it.
   } else if (event->variant == "AllDownloadsComplete") {

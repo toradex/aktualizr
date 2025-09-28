@@ -61,7 +61,7 @@ class SecondaryEcuInstallationJob {
   Uptane::EcuSerial ecu_serial_;
   std::string correlation_id_;
   InstallInfo install_info_;
-  data::InstallationResult installation_result_{};  // default ctor => success
+  data::InstallationResult installation_result_;  // default ctor => success
   std::future<void> firmware_send_;
   std::future<void> install_;
   bool have_installed_{false};

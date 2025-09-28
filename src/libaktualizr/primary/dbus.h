@@ -108,9 +108,9 @@ class Dbus : public Consent {
   std::array<int, 2> stop_fds_{-1, -1};
   std::thread dbus_thread_;
   std::mutex lock_;  // Hold this while modifying anything below
-  std::function<void()> check_for_updates_callback_{};
-  std::function<void()> cancel_callback_{};
-  std::function<void(const boost::filesystem::path &)> offline_update_callback_{};
+  std::function<void()> check_for_updates_callback_;
+  std::function<void()> cancel_callback_;
+  std::function<void(const boost::filesystem::path &)> offline_update_callback_;
   /** The currently in-flight request. Empty => Nothing in flight */
   std::string current_consent_request_;
   /** If there is an in-flight request, then this is valid */

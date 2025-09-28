@@ -3,6 +3,7 @@
 #include <cassert>
 #include <sstream>
 
+#include "logging/logging.h"
 #include "utilities/utils.h"
 
 struct WriteStringArg {

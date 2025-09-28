@@ -12,7 +12,6 @@
 #include "libaktualizr/packagemanagerinterface.h"
 
 #include "crypto/keymanager.h"
-#include "utilities/apiqueue.h"
 
 constexpr const char *remote = "aktualizr-remote";
 
@@ -33,7 +32,7 @@ struct PullMetaStruct {
         cancellable{cancellable_in},
         progress_cb{std::move(progress_cb_in)} {}
   Uptane::Target target;
-  unsigned int percent_complete{0};
+  unsigned int percent_complete{};
   const api::FlowControlToken *token;
   GObjectUniquePtr<GCancellable> cancellable;
   OstreeProgressCb progress_cb;

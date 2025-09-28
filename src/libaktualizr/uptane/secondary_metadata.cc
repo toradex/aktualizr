@@ -1,4 +1,5 @@
 #include "secondary_metadata.h"
+#include "logging/logging.h"
 
 namespace Uptane {
 

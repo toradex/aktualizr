@@ -76,7 +76,7 @@ class DockerComposeSecondary : public ManagedSecondary {
     return res;
   }
 
-  ComposeManager compose_manager_{};
+  ComposeManager compose_manager_;
 };
 
 }  // namespace Primary

@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <cassert>
 #include <fstream>
-#include <functional>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -206,7 +205,7 @@ static const std::string &na_if_empty(const std::string &str) {
   if (str.empty()) {
     return na_str;
   }
-  return str;
+  return str;  // NOLINT
 }
 
 // ---
@@ -237,7 +236,7 @@ class LargeTemporaryDirectory {
   boost::filesystem::path tmp_name_;
 };
 
-boost::filesystem::path get_large_tmp_dir() {
+static boost::filesystem::path get_large_tmp_dir() {
   static const boost::filesystem::path large_tmp_dir{"/var/tmp/"};
   if (boost::filesystem::exists(large_tmp_dir) && boost::filesystem::is_directory(large_tmp_dir)) {
     LOG_TRACE << "Temporary directory set to " << large_tmp_dir;

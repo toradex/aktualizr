@@ -9,7 +9,6 @@
 #include "json/json.h"
 
 #include "libaktualizr/types.h"
-#include "logging/logging.h"
 #include "utilities/flow_control.h"
 #include "utilities/utils.h"
 

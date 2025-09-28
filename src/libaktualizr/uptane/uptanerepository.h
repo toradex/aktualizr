@@ -1,7 +1,6 @@
 #ifndef UPTANE_REPOSITORY_H_
 #define UPTANE_REPOSITORY_H_
 
-#include <cstdint>               // for int64_t
 #include <string>                // for string
 #include "libaktualizr/types.h"  // for TimeStamp
 #include "uptane/tuf.h"          // for Root, RepositoryType
@@ -49,7 +48,7 @@ class RepositoryCommon {
   RepositoryType type;
 
  private:
-  TimeStamp overriden_now_{};
+  TimeStamp overriden_now_;
 };
 }  // namespace Uptane
 

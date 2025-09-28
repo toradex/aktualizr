@@ -95,8 +95,8 @@ void RepositoryCommon::updateRoot(INvStorage& storage, const IMetadataFetcher& f
 }
 
 void RepositoryCommon::ForceNowForTesting(TimeStamp&& fake_now) {
-  LOG_WARNING << "Forcing Now() for " << type << " to " << fake_now;
-  overriden_now_ = fake_now;
+  overriden_now_ = std::move(fake_now);
+  LOG_WARNING << "Forcing Now() for " << type << " to " << overriden_now_;
 }
 
 TimeStamp RepositoryCommon::Now() const {

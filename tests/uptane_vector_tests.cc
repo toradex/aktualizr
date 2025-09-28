@@ -10,6 +10,7 @@
 #include "logging/logging.h"
 #include "primary/sotauptaneclient.h"
 #include "storage/invstorage.h"
+#include "uptane/exceptions.h"
 #include "utilities/utils.h"
 
 using std::string;

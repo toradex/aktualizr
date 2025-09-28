@@ -1,4 +1,5 @@
 #include "aktualizr_secondary_ostree.h"
+#include "logging/logging.h"
 #include "package_manager/ostreemanager.h"
 #include "update_agent_ostree.h"
 
@@ -94,4 +95,4 @@ data::InstallationResult AktualizrSecondaryOstree::installPendingTarget(const Up
   return update_agent_->install(target);
 }
 
-void AktualizrSecondaryOstree::completeInstall() { return update_agent_->completeInstall(); }
+void AktualizrSecondaryOstree::completeInstall() { update_agent_->completeInstall(); }

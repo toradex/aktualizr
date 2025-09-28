@@ -16,7 +16,6 @@
 #include "primary/sotauptaneclient.h"
 #include "primary/update_lock_file.h"
 #include "utilities/apiqueue.h"
-#include "utilities/timer.h"
 
 #ifdef BUILD_DBUS
 #include "primary/dbus.h"
@@ -495,7 +494,7 @@ std::future<void> Aktualizr::SendDeviceData(const Json::Value &hwinfo) {
 }
 
 std::future<void> Aktualizr::CompleteSecondaryUpdates() {
-  std::function<void()> task([this] { return uptane_client_->completePreviousSecondaryUpdates(); });
+  std::function<void()> task([this] { uptane_client_->completePreviousSecondaryUpdates(); });
   return api_queue_->enqueue(std::move(task));
 }
 
@@ -520,7 +519,7 @@ std::future<result::Install> Aktualizr::Install(const std::vector<Uptane::Target
 }
 
 void Aktualizr::StoreInstallationFailure(const data::InstallationResult &result) {
-  std::function<void()> task([this, result] { return uptane_client_->storeInstallationFailure(result); });
+  std::function<void()> task([this, result] { uptane_client_->storeInstallationFailure(result); });
   api_queue_->enqueue(std::move(task));
 }
 

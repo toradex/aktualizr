@@ -8,6 +8,7 @@
 #include "aktualizr_secondary_file.h"
 #include "crypto/keymanager.h"
 #include "libaktualizr/types.h"
+#include "logging/logging.h"
 #include "storage/invstorage.h"
 #include "update_agent_file.h"
 #include "uptane_repo.h"

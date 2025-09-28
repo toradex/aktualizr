@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <primary/secondary_provider_builder.h>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/filesystem.hpp>
@@ -9,14 +10,15 @@
 #include "uptane_test_common.h"
 #include "utilities/utils.h"
 
-int setenv(const std::string& name, const std::string& value) { return setenv(name.c_str(), value.c_str(), 1); }
+static int setenv(const std::string& name, const std::string& value) { return setenv(name.c_str(), value.c_str(), 1); }
 
-std::string getSha256Sum(boost::filesystem::path file) {
+static std::string getSha256Sum(boost::filesystem::path file) {
   // See https://www.boost.org/doc/libs/1_65_0/doc/html/boost_process/tutorial.html
   std::string sha256sum;
   boost::process::ipstream is;
   boost::process::child chld(boost::process::search_path("sha256sum"), file, boost::process::std_out > is);
-  std::string line, hash;
+  std::string line;
+  std::string hash;
   while (chld.running() && std::getline(is, line) && !line.empty()) {
     std::vector<std::string> parts;
     boost::algorithm::trim(line);

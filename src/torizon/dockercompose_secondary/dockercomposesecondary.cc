@@ -38,7 +38,7 @@ std::vector<DockerComposeSecondaryConfig> DockerComposeSecondaryConfig::create_f
   sec_configs.reserve(json_config[Type].size());
 
   for (const auto& item : json_config[Type]) {
-    sec_configs.emplace_back(DockerComposeSecondaryConfig(item));
+    sec_configs.emplace_back(item);
   }
   return sec_configs;
 }

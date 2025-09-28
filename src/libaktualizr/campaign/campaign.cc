@@ -1,6 +1,6 @@
 #include "libaktualizr/campaign.h"
-#include "http/httpclient.h"
-#include "utilities/utils.h"
+#include "http/httpinterface.h"
+#include "logging/logging.h"
 
 namespace campaign {
 
@@ -89,7 +89,7 @@ std::vector<Campaign> Campaign::campaignsFromJson(const Json::Value &json) {
 
   for (const auto &c : campaigns_array) {
     try {
-      campaigns.emplace_back(Campaign(c));
+      campaigns.emplace_back(c);
     } catch (const CampaignParseError &exc) {
       LOG_ERROR << "Error parsing " << c << ": " << exc.what();
     }

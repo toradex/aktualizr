@@ -22,12 +22,11 @@
 
 #include "bootloader/bootloader.h"
 #include "http/httpclient.h"
+#include "logging/logging.h"
 #include "primary/consent.h"
-#include "primary/secondary_provider_builder.h"
 #include "provisioner.h"
 #include "reportqueue.h"
 #include "uptane/directorrepository.h"
-#include "uptane/exceptions.h"
 #include "uptane/fetcher.h"
 #include "uptane/imagerepository.h"
 #include "uptane/iterator.h"

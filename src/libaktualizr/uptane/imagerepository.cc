@@ -199,7 +199,6 @@ std::shared_ptr<Uptane::Targets> ImageRepository::verifyDelegation(const std::st
                                                                    const Targets& parent_target) {
   try {
     const Json::Value delegation_json = Utils::parseJSON(delegation_raw);
-    const std::string canonical = Utils::jsonToCanonicalStr(delegation_json);
 
     // Verify the signature:
     // PURE-2 step 8(iii.b)

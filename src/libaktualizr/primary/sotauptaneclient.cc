@@ -12,6 +12,7 @@
 #include "logging/logging.h"
 #include "primary/reportqueue.h"
 #include "primary/secondary_install_job.h"
+#include "primary/secondary_provider_builder.h"
 #include "provisioner.h"
 #include "uptane/exceptions.h"
 #include "uptane/tuf.h"

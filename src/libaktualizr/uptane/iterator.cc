@@ -1,6 +1,7 @@
 #include "iterator.h"
 
 #include "libaktualizr/types.h"
+#include "logging/logging.h"
 #include "storage/invstorage.h"
 #include "uptane/exceptions.h"
 

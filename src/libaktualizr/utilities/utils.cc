@@ -343,6 +343,8 @@ void Utils::writeFile(const boost::filesystem::path &filename, const Json::Value
   Utils::writeFile(filename, jsonToStr(content), create_directories);
 }
 
+// TODO: Investigate a better solution here
+// NOLINTNEXTLINE
 void Utils::writeFile(const boost::filesystem::path &filename, std::istream &&content) {
   // also replace the target file atomically by creating filename.new and
   // renaming it to the target file name
@@ -398,9 +400,9 @@ Json::Value Utils::getNetworkInfo() {
   std::string route_content((std::istreambuf_iterator<char>(path_stream)), std::istreambuf_iterator<char>());
 
   struct Itf {
-    std::string name = std::string();
-    std::string ip = std::string();
-    std::string mac = std::string();
+    std::string name;
+    std::string ip;
+    std::string mac;
   } itf;
   std::istringstream route_stream(route_content);
   std::array<char, 200> line{};

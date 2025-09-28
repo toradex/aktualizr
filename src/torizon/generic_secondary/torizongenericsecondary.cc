@@ -1,4 +1,3 @@
-#include <chrono>
 #include <fstream>
 #include <unordered_map>
 
@@ -8,14 +7,14 @@
 #include <boost/filesystem.hpp>
 #include <boost/process.hpp>
 
-#include "crypto/crypto.h"
+#include "logging/logging.h"
 #include "uptane/manifest.h"
 #include "utilities/utils.h"
 
 #include "torizongenericsecondary.h"
 
-#define CURRENT_INTERFACE_MAJOR 1
-#define CURRENT_INTERFACE_MINOR 0
+static constexpr int CURRENT_INTERFACE_MAJOR = 1;
+static constexpr int CURRENT_INTERFACE_MINOR = 0;
 
 namespace bp = boost::process;
 namespace bf = boost::filesystem;
@@ -47,7 +46,7 @@ std::vector<TorizonGenericSecondaryConfig> TorizonGenericSecondaryConfig::create
   sec_configs.reserve(json_config[Type].size());
 
   for (const auto& item : json_config[Type]) {
-    sec_configs.emplace_back(TorizonGenericSecondaryConfig(item));
+    sec_configs.emplace_back(item);
   }
   return sec_configs;
 }
@@ -83,7 +82,7 @@ void TorizonGenericSecondaryConfig::dump(const boost::filesystem::path& file_ful
   json_file.close();
 }
 
-inline boost::filesystem::path addNewExtension(const boost::filesystem::path& fpath) {
+inline static boost::filesystem::path addNewExtension(const boost::filesystem::path& fpath) {
   return boost::filesystem::path(fpath.string() + ".new");
 }
 

@@ -134,6 +134,7 @@ data::InstallationResult ManagedSecondary::putMetadataOffUpd(const Uptane::Targe
   (void)target;
   detected_attack = "";
 
+// NOLINTNEXTLINE
 #if 0
   /*
    * TODO: [OFFUPD] Discuss and hopefully remove this block.

@@ -1,6 +1,7 @@
 #include "update_agent_ostree.h"
 
 #include <boost/algorithm/string/trim.hpp>
+#include <thread>
 
 #include "logging/logging.h"
 #include "package_manager/ostreemanager.h"

@@ -48,7 +48,9 @@ bool CommandRunner::run(const std::string& cmd, const api::FlowControlToken* flo
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 std::vector<std::string> CommandRunner::runResult(const std::string& cmd) {
-  // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
+  // This line seems to trigger a FP in CSA
+  // boost/process/pipe.hpp:190:12: error: Call to virtual method 'basic_pipebuf::sync' during destruction bypasses
+  // virtual dispatch [clang-analyzer-optin.cplusplus.VirtualCall,-warnings-as-errors] NOLINTNEXTLINE
   LOG_INFO << "Running command: " << cmd;
   boost::process::ipstream pipe;
   // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
@@ -65,6 +67,5 @@ std::vector<std::string> CommandRunner::runResult(const std::string& cmd) {
   }
 
   c.wait();
-
   return result;
 }

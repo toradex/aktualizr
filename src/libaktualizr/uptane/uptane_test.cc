@@ -23,6 +23,7 @@
 #include "storage/fsstorage_read.h"
 #include "storage/invstorage.h"
 #include "test_utils.h"
+#include "uptane/exceptions.h"
 #include "uptane/tuf.h"
 #include "uptane/uptanerepository.h"
 #include "uptane_test_common.h"

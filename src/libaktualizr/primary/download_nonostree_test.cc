@@ -8,6 +8,7 @@
 #include "package_manager/ostreemanager.h"
 #include "storage/sqlstorage.h"
 #include "test_utils.h"
+#include "uptane/exceptions.h"
 #include "uptane_test_common.h"
 
 static std::string server = "http://127.0.0.1:";

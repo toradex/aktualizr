@@ -102,7 +102,7 @@ void Target::updateCustom(const Json::Value &custom) {
     Json::Value hwids = custom_["hardwareIds"];
     hwids_.clear();
     for (auto i = hwids.begin(); i != hwids.end(); ++i) {
-      hwids_.emplace_back(HardwareIdentifier((*i).asString()));
+      hwids_.emplace_back((*i).asString());
     }
   }
 

@@ -100,18 +100,6 @@ static void ensure(bool cond, const char *message) {
   }
 }
 
-/**
- * Print function for string sets:
- */
-std::ostream &operator<<(std::ostream &stream, const std::set<std::string> &value) {
-  stream << "{";
-  for (const auto &item : value) {
-    stream << item << ", ";
-  }
-  stream << "}";
-  return stream;
-}
-
 static constexpr std::size_t ARCHIVE_CTRL_BUFFER_SIZE = DEFAULT_BLOCK_BUFFER_SIZE_BYTES;
 
 /**
@@ -540,7 +528,7 @@ bool DockerTarballLoader::validateMetadata(StringToStringSet *expected_tags_per_
 }
 
 bool DockerTarballLoader::loadImages() {
-  // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
+  // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker, clang-analyzer-optin.cplusplus.VirtualCall)
   LOG_INFO << "Loading images from tarball: " << tarball_;
 
   // Open tarball as raw binary data.
@@ -655,5 +643,6 @@ bool DockerTarballLoader::loadImages() {
   LOG_INFO << "Loading of " << tarball_ << " finished, "
            << "code: " << docker_proc.exit_code() << ", status: " << (success ? "success" : "failed");
 
+  // NOLINTNEXTLINE
   return success;
 }

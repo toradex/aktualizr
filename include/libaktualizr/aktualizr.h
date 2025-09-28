@@ -477,7 +477,7 @@ class Aktualizr {
   using Clock = std::chrono::steady_clock;
   Clock::time_point next_online_poll_;
   Clock::time_point next_offline_poll_;
-  result::UpdateCheck update_result_{};
+  result::UpdateCheck update_result_;
   // Make sure this is declared before SotaUptaneClient to prevent Valgrind
   // complaints with destructors.
   Config config_;
@@ -507,7 +507,7 @@ class Aktualizr {
       return run_mode;
     }
     bool check_for_updates_now{false};
-    boost::filesystem::path check_for_offline_updates{};
+    boost::filesystem::path check_for_offline_updates;
   } exit_cond_;
 
   std::shared_ptr<INvStorage> storage_;
