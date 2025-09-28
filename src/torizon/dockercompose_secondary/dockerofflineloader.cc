@@ -151,7 +151,7 @@ std::string getDockerPlatform() {
     return std::string(envplat);
   }
 
-  struct utsname uinfo {};
+  struct utsname uinfo{};
   ensure(uname(&uinfo) == 0, "Cannot get system information");
   std::string sysname(uinfo.sysname);
   ensure(sysname == "Linux", "Only Linux is supported");

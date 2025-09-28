@@ -149,7 +149,7 @@ void DeviceDataProxy::Start() {
     LOG_INFO << "PROXY: starting thread.";
 
     std::string device_buffered_data;
-    struct epoll_event events {};
+    struct epoll_event events{};
     int epoll_errors = 0;
     int listener_socket;
     int timeout = -1;
@@ -165,13 +165,13 @@ void DeviceDataProxy::Start() {
     int epfd = epoll_create(2);
 
     // set up file descriptor to cancel (stop) the thread
-    struct epoll_event ev1 {};
+    struct epoll_event ev1{};
     ev1.events = EPOLLIN | EPOLLPRI;
     ev1.data.fd = cancel_pipe[0];
     epoll_ctl(epfd, EPOLL_CTL_ADD, cancel_pipe[0], &ev1);
 
     // set up file descriptor to listen to TCP connections
-    struct epoll_event ev2 {};
+    struct epoll_event ev2{};
     ev2.events = EPOLLIN | EPOLLPRI;
     ev2.data.fd = listener_socket;
     epoll_ctl(epfd, EPOLL_CTL_ADD, listener_socket, &ev2);
@@ -217,7 +217,7 @@ void DeviceDataProxy::Start() {
         LOG_DEBUG << "PROXY: receiving connection from client. fd=" << connection_socket;
         if (connection_socket >= 0) {
           // set up file descriptor to listen to client connection
-          struct epoll_event evconn {};
+          struct epoll_event evconn{};
           evconn.events = EPOLLIN | EPOLLPRI;
           evconn.data.fd = connection_socket;
           epoll_ctl(epfd, EPOLL_CTL_ADD, connection_socket, &evconn);

@@ -220,7 +220,7 @@ void Dbus::Run() {
     }
     // convert an absolute timeout relative to CLOCK_MONOTONIC to a relative
     // number of ms
-    struct timespec now {};
+    struct timespec now{};
     res = clock_gettime(CLOCK_MONOTONIC, &now);
     if (res != 0) {
       throw std::system_error(errno, std::system_category(), "clock_gettime failed");
