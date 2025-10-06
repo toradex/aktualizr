@@ -153,10 +153,6 @@ test-bullseye-p11:
     - docker_cmd "GEN_BUILDSYS=0 BLD_DEFAULT=0 BLD_TESTS=0 RUN_TESTS=1 RUN_CHECK_FORMAT=0 RUN_CLANG_TIDY=0 TEST_BLACKLIST=\"${TEST_BLACKLIST}\" CTEST_PARALLEL_LEVEL=$(nproc) CTEST_OUTPUT_ON_FAILURE=1 ${TEST_SCRIPT}"
     - echo -e "\e[0Ksection_end:$(date +%s):run_tests\r\e[0K"
 
-    - echo -e "\e[0Ksection_start:$(date +%s):clang_tidy\r\e[0KRun clang-tidy"
-    - docker_cmd "GEN_BUILDSYS=0 BLD_DEFAULT=0 BLD_TESTS=0 RUN_TESTS=0 RUN_CHECK_FORMAT=0 RUN_CLANG_TIDY=1 ${TEST_SCRIPT}"
-    - echo -e "\e[0Ksection_end:$(date +%s):clang_tidy\r\e[0K"
-
 test-bookworm-nop11:
   extends: .test-base
   variables:
@@ -181,6 +177,47 @@ test-bookworm-nop11:
       test_uptane_network
       test_uptane_update_failure
     CCACHE_TAR: cache-bookworm.tar
+  script:
+    - restore_ccache "${CCACHE_TAR}"
+
+    - echo -e "\e[0Ksection_start:$(date +%s):gen_buildsys\r\e[0KGenerate build-system files"
+    - docker_cmd "GEN_BUILDSYS=1 BLD_DEFAULT=0 BLD_TESTS=0 RUN_TESTS=0 RUN_CHECK_FORMAT=0 RUN_CLANG_TIDY=0 ${TEST_SCRIPT}"
+    - echo -e "\e[0Ksection_end:$(date +%s):gen_buildsys\r\e[0K"
+
+    - echo -e "\e[0Ksection_start:$(date +%s):build_aktualizr\r\e[0KBuild Aktualizr and Tests"
+    - docker_cmd "GEN_BUILDSYS=0 BLD_DEFAULT=0 BLD_TESTS=1 RUN_TESTS=0 RUN_CHECK_FORMAT=0 RUN_CLANG_TIDY=0 ${TEST_SCRIPT}"
+    - echo -e "\e[0Ksection_end:$(date +%s):build_aktualizr\r\e[0K"
+
+    - save_ccache "${CCACHE_TAR}"
+
+    - echo -e "\e[0Ksection_start:$(date +%s):run_tests\r\e[0KRun tests"
+    - docker_cmd "GEN_BUILDSYS=0 BLD_DEFAULT=0 BLD_TESTS=0 RUN_TESTS=1 RUN_CHECK_FORMAT=0 RUN_CLANG_TIDY=0 TEST_BLACKLIST=\"${TEST_BLACKLIST}\" CTEST_PARALLEL_LEVEL=$(nproc) CTEST_OUTPUT_ON_FAILURE=1 ${TEST_SCRIPT}"
+    - echo -e "\e[0Ksection_end:$(date +%s):run_tests\r\e[0K"
+
+test-trixie-nop11:
+  extends: .test-base
+  variables:
+    DOCKER_IMG: aktualizr-ci
+    DOCKER_TAG: trixie
+    DOCKERFILE: docker/Dockerfile.debian.trixie
+    TEST_SCRIPT: source/scripts/build-and-test-trixie.sh
+    TEST_BLACKLIST: >-
+      aktualizr-option-version
+      test-help-with-nonexistent-options
+      test-help-with-other-options
+      test_aktualizr
+      test_aktualizr_update_lock
+      test_c_api
+      test_customrepo_failure
+      test_install_aktualizr_and_update
+      test_ip_secondary
+      test_ip_secondary_rotation
+      test_uptane
+      test_uptane_cancellation
+      test_uptane_delegation
+      test_uptane_network
+      test_uptane_update_failure
+    CCACHE_TAR: cache-trixie.tar
   script:
     - restore_ccache "${CCACHE_TAR}"
 

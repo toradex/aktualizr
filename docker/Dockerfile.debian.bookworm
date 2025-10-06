@@ -16,8 +16,6 @@ RUN apt-get update && apt-get -y install -\
   automake \
   bison \
   ccache \
-  clang-tidy \
-  clang-format \
   cmake \
   curl \
   g++ \

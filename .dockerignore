@@ -1,2 +1,6 @@
 build*
 cmake-build-debug
+/.cache
+/.vscode
+/fail_state.*
+/.mypy_cache

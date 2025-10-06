@@ -22,8 +22,8 @@ gen_buildsys_="${GEN_BUILDSYS:-1}"
 bld_default_="${BLD_DEFAULT:-1}"
 bld_tests_="${BLD_TESTS:-1}"
 run_tests_="${RUN_TESTS:-1}"
-run_check_format_="${RUN_CHECK_FORMAT:-0}"
-run_clang_tidy_="${RUN_CLANG_TIDY:-0}"
+run_check_format_="${RUN_CHECK_FORMAT:-1}"
+run_clang_tidy_="${RUN_CLANG_TIDY:-1}"
 tst_blacklist_="${TEST_BLACKLIST-}"
 
 tmpdir() {
@@ -35,8 +35,8 @@ tmpdir() {
 # This expects to find the checked out source code in ./source
 # It builds it into ./build and runs the tests.
 # Test with
-# docker build -t aktualizr-bullseye -f docker/Dockerfile.debian.bullseye .
-# docker run --mount=type=volume,source=ccache,destination=/home/testuser/.cache -it aktualizr-bullseye source/scripts/build-and-test.sh
+# docker build -t aktualizr-trixie -f docker/Dockerfile.debian.trixie .
+# docker run --mount=type=volume,source=ccache,destination=/home/testuser/.cache -it aktualizr-trixie source/scripts/build-and-test-trixie.sh
 
 if [ "${gen_buildsys_}" = "1" ] || [ ! -e "build/build.ninja" ]; then
     echo -e "\n== Generating build.ninja ==\n"
@@ -51,21 +51,21 @@ BLD_DIR=$(pwd)/build
 if [ "${run_check_format_}" = "1" ]; then
     cd "${BLD_DIR}"
     echo -e "\n== Make 'check-format' ==\n"
-    time ninja -v check-format
+    time ninja check-format
 fi
 
 if [ "${bld_default_}" = "1" ]; then
     cd "${BLD_DIR}"
     tmpdir "${BLD_DIR}/tmp"
     echo -e "\n== Building default targets ==\n"
-    time ninja -v
+    time ninja
 fi
 
 if [ "${bld_tests_}" = "1" ]; then
     cd "${BLD_DIR}"
     tmpdir "${BLD_DIR}/tmp"
     echo -e "\n== Building tests ==\n"
-    time ninja -v build_tests
+    time ninja build_tests
 fi
 
 if [ "${run_tests_}" = "1" ]; then
@@ -85,13 +85,13 @@ if [ "${run_tests_}" = "1" ]; then
 
     export OSTREE_SYSROOT_DEBUG="mutable-deployments"
     echo -e "\n== Running tests ==\n"
-    ctest ${tst_blacklist_:+-E "${tst_blacklist_}"} -V
+    ctest ${tst_blacklist_:+-E "${tst_blacklist_}"} --output-on-failure -j "$(nproc)"
 fi
 
 if [ "${run_clang_tidy_}" = "1" ]; then
     cd "${BLD_DIR}"
     echo -e "\n== Make 'clang-tidy' ==\n"
-    time ninja -v clang-tidy -k 0 -j "$(nproc)"
+    time ninja clang-tidy -k 0 -j "$(nproc)"
 fi
 
 echo -e "\n== DONE! ==\n"

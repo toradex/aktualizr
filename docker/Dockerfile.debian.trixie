@@ -1,7 +1,7 @@
-FROM debian:bullseye
-LABEL Description="Aktualizr CI image using Debian Bullseye (oldstable)"
+FROM debian:trixie
+LABEL Description="Aktualizr CI image using Debian Trixie (stable)"
 
-ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt-get update && apt-get -y install --no-install-suggests --no-install-recommends debian-archive-keyring
 
@@ -16,9 +16,10 @@ RUN apt-get update && apt-get -y install -\
   automake \
   bison \
   ccache \
+  clang-tidy-19 \
+  clang-format-19 \
   cmake \
   curl \
-  fiu-utils \
   g++ \
   git \
   jq \
@@ -31,7 +32,6 @@ RUN apt-get update && apt-get -y install -\
   libboost-thread-dev \
   libcurl4-openssl-dev \
   libengine-pkcs11-openssl \
-  libfiu-dev \
   libglib2.0-dev \
   libgtest-dev \
   libostree-dev \
@@ -50,12 +50,11 @@ RUN apt-get update && apt-get -y install -\
   psmisc \
   python3-dev \
   python3-gi \
+  python3-legacy-cgi \
   python3-openssl \
   python3-pip \
   python3-requests \
   python3-venv \
-  shellcheck \
-  softhsm2 \
   sqlite3 \
   zip
 
