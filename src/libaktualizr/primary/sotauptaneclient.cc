@@ -322,15 +322,15 @@ void SotaUptaneClient::reportAktualizrConfiguration() {
   }
 }
 
-Json::Value SotaUptaneClient::AssembleManifest() {
-  Json::Value manifest;  // signed top-level
+Uptane::Manifest SotaUptaneClient::AssembleManifest() {
+  Uptane::Manifest manifest;  // signed top-level
   Uptane::EcuSerial primary_ecu_serial = primaryEcuSerial();
   manifest["primary_ecu_serial"] = primary_ecu_serial.ToString();
 
   // first part: report current version/state of all ECUs
   Json::Value version_manifest;
 
-  Json::Value primary_manifest = uptane_manifest->assembleManifest(package_manager_->getCurrent());
+  Uptane::Manifest primary_manifest = uptane_manifest->assembleManifest(package_manager_->getCurrent());
   std::vector<std::pair<Uptane::EcuSerial, int64_t>> ecu_cnt;
   std::string report_counter;
   if (!storage->loadEcuReportCounter(&ecu_cnt) || ecu_cnt.empty()) {
@@ -358,7 +358,7 @@ Json::Value SotaUptaneClient::AssembleManifest() {
       std::string cached;
       if (storage->loadCachedEcuManifest(ecu_serial, &cached)) {
         LOG_WARNING << "Could not reach Secondary " << ecu_serial << ", sending a cached version of its manifest";
-        secmanifest = Utils::parseJSON(cached);
+        secmanifest = Uptane::Manifest(Utils::parseJSON(cached));
         from_cache = true;
       } else {
         LOG_ERROR << "Failed to get a valid manifest from Secondary with serial " << ecu_serial << " or from cache!";

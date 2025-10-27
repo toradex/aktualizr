@@ -1,6 +1,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <libaktualizr/types.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -611,7 +612,7 @@ class SecondaryInterfaceMock : public SecondaryInterface {
 #endif  // BUILD_OFFLINE_UPDATES
   std::shared_ptr<SecondaryProvider> secondary_provider_;
   PublicKey public_key_;
-  Json::Value manifest_;
+  Uptane::Manifest manifest_;
 
   Primary::VirtualSecondaryConfig sconfig;
 };

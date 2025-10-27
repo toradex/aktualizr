@@ -22,6 +22,7 @@
 
 #include "bootloader/bootloader.h"
 #include "http/httpclient.h"
+#include "libaktualizr/types.h"
 #include "logging/logging.h"
 #include "primary/consent.h"
 #include "provisioner.h"
@@ -159,7 +160,7 @@ class SotaUptaneClient {
 
   std::pair<bool, Uptane::Target> downloadImage(const Uptane::Target &target, UpdateType utype = UpdateType::kOnline);
   data::InstallationResult PackageInstall(const Uptane::Target &target);
-  Json::Value AssembleManifest();
+  Uptane::Manifest AssembleManifest();
   std::exception_ptr getLastException() const { return last_exception; }
   Uptane::Target getCurrent() const { return package_manager_->getCurrent(); }
 

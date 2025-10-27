@@ -7,6 +7,7 @@
 #include <boost/filesystem.hpp>
 
 #include "crypto/crypto.h"
+#include "libaktualizr/types.h"
 #include "logging/logging.h"
 #include "storage/invstorage.h"
 #include "uptane/directorrepository.h"
@@ -278,7 +279,7 @@ data::InstallationResult ManagedSecondary::install(const Uptane::Target &target,
 Uptane::Manifest ManagedSecondary::getManifest() const {
   Uptane::InstalledImageInfo firmware_info;
   if (!getFirmwareInfo(firmware_info)) {
-    return Json::Value(Json::nullValue);
+    return Uptane::Manifest(Json::Value(Json::nullValue));
   }
 
   Json::Value manifest = Uptane::ManifestIssuer::assembleManifest(firmware_info, getSerial());
@@ -287,7 +288,7 @@ Uptane::Manifest ManagedSecondary::getManifest() const {
   // and signing functionality in one place
   manifest["attacks_detected"] = detected_attack;
 
-  Json::Value signed_ecu_version;
+  Uptane::Manifest signed_ecu_version;
 
   std::string b64sig = Utils::toBase64(Crypto::RSAPSSSign(nullptr, private_key, Utils::jsonToCanonicalStr(manifest)));
   Json::Value signature;

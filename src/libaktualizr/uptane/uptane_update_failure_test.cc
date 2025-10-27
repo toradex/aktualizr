@@ -61,7 +61,7 @@ class FailingSecondary : public SecondaryInterface {
   Uptane::Manifest getManifest() const override {
     Json::Value manifest = Uptane::ManifestIssuer::assembleManifest(firmware_info, getSerial());
     manifest["attacks_detected"] = "";
-    Json::Value signed_ecu_version;
+    Uptane::Manifest signed_ecu_version;
     auto const b64sig = Utils::toBase64(Crypto::RSAPSSSign(nullptr, private_key, Utils::jsonToCanonicalStr(manifest)));
     Json::Value signature;
     signature["method"] = "rsassa-pss";

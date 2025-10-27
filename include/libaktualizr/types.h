@@ -486,8 +486,7 @@ std::ostream &operator<<(std::ostream &os, const Target &t);
 
 class Manifest : public Json::Value {
  public:
-  // NOLINTNEXTLINE(google-explicit-constructor, hicpp-explicit-conversions)
-  Manifest(const Json::Value &value = Json::Value()) : Json::Value(value) {}
+  explicit Manifest(const Json::Value &value = Json::Value()) : Json::Value(value) {}
 
   std::string filepath() const;
   Hash installedImageHash() const;

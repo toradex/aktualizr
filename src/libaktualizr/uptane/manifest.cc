@@ -3,6 +3,7 @@
 #include <boost/algorithm/string/case_conv.hpp>
 
 #include "crypto/keymanager.h"
+#include "libaktualizr/types.h"
 #include "logging/logging.h"
 
 namespace Uptane {
@@ -57,7 +58,7 @@ Manifest ManifestIssuer::sign(const Manifest &manifest, const std::string &repor
   if (!report_counter.empty()) {
     manifest_to_sign["report_counter"] = report_counter;
   }
-  return key_mngr_->signTuf(manifest_to_sign);
+  return Manifest(key_mngr_->signTuf(manifest_to_sign));
 }
 
 Manifest ManifestIssuer::assembleManifest(const InstalledImageInfo &installed_image_info,
@@ -67,7 +68,7 @@ Manifest ManifestIssuer::assembleManifest(const InstalledImageInfo &installed_im
   installed_image["fileinfo"]["length"] = Json::UInt64(installed_image_info.len);
   installed_image["fileinfo"]["hashes"]["sha256"] = installed_image_info.hash;
 
-  Json::Value unsigned_ecu_version;
+  Uptane::Manifest unsigned_ecu_version;
   unsigned_ecu_version["attacks_detected"] = "";
   unsigned_ecu_version["installed_image"] = installed_image;
   unsigned_ecu_version["ecu_serial"] = ecu_serial.ToString();
@@ -100,7 +101,7 @@ Manifest ManifestIssuer::assembleManifest(const Uptane::Target &target) const {
 }
 
 Manifest ManifestIssuer::assembleAndSignManifest(const InstalledImageInfo &installed_image_info) const {
-  return key_mngr_->signTuf(assembleManifest(installed_image_info));
+  return Manifest(key_mngr_->signTuf(assembleManifest(installed_image_info)));
 }
 
 }  // namespace Uptane

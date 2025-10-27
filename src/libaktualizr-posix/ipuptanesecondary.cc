@@ -10,6 +10,7 @@
 #include "asn1/asn1_message.h"
 #include "der_encoder.h"
 #include "libaktualizr/secondary_provider.h"
+#include "libaktualizr/types.h"
 #include "logging/logging.h"
 #include "uptane/tuf.h"
 #include "utilities/flow_control.h"
@@ -336,16 +337,16 @@ Manifest IpUptaneSecondary::getManifest() const {
 
   if (resp->present() != AKIpUptaneMes_PR_manifestResp) {
     LOG_ERROR << "Secondary " << getSerial() << " failed to respond to a manifest request.";
-    return Json::Value();
+    return Manifest();
   }
   auto r = resp->manifestResp();
 
   if (r->manifest.present != manifest_PR_json) {
     LOG_ERROR << "Manifest wasn't in json format";
-    return Json::Value();
+    return Manifest();
   }
   std::string manifest = ToString(r->manifest.choice.json);  // NOLINT(cppcoreguidelines-pro-type-union-access)
-  return Utils::parseJSON(manifest);
+  return Manifest(Utils::parseJSON(manifest));
 }
 
 bool IpUptaneSecondary::ping() const {
