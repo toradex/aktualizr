@@ -2,12 +2,7 @@
 
 # Optional input variables:
 #
-# - GEN_BUILDSYS: set to "1" to generate the build system files.
-# - BLD_DEFAULT: set to "1" to build the default targets.
-# - BLD_TESTS: set to "1" to build the tests.
-# - RUN_TESTS: set to "1" to run the tests.
-# - RUN_CHECK_FORMAT: set to "1" to run "check-format".
-# - RUN_CLANG_TIDY:  set to "1" to run "clang-tidy".
+# - STEPS: what steps to execute; see parsing below for possible values.
 # - TEST_BLACKLIST: space/newline separated list of tests not to
 #   run, e.g. "test_ostree_custom_uri test_misc_ostree_update".
 #
@@ -18,12 +13,14 @@
 
 set -euo pipefail
 
-gen_buildsys_="${GEN_BUILDSYS:-1}"
-bld_default_="${BLD_DEFAULT:-1}"
-bld_tests_="${BLD_TESTS:-1}"
-run_tests_="${RUN_TESTS:-1}"
-run_check_format_="${RUN_CHECK_FORMAT:-1}"
-run_clang_tidy_="${RUN_CLANG_TIDY:-1}"
+STEPS=${STEPS-all}
+
+gen_buildsys_=$([[ " ${STEPS} " =~ ( gen-buildsys | build | all ) ]] && echo "1" || echo "0")
+bld_default_=$([[ " ${STEPS} " =~ ( build-default | build | all ) ]] && echo "1" || echo "0")
+bld_tests_=$([[ " ${STEPS} " =~ ( build-tests | build | all ) ]] && echo "1" || echo "0")
+run_tests_=$([[ " ${STEPS} " =~ ( run-tests | test | all) ]] && echo "1" || echo "0")
+run_check_format_=$([[ " ${STEPS} " =~ ( check-format | qa | all) ]] && echo "1" || echo "0")
+run_clang_tidy_=$([[ " ${STEPS} " =~ ( tidy | qa | all ) ]] && echo "1" || echo "0")
 tst_blacklist_="${TEST_BLACKLIST-}"
 
 tmpdir() {
