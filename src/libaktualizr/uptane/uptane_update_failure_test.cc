@@ -130,7 +130,8 @@ class FailingSecondary : public SecondaryInterface {
   void cleanStartup() override { nothing_pending_calls++; }
 
 #ifdef BUILD_OFFLINE_UPDATES
-  data::InstallationResult putMetadataOffUpd(const Uptane::Target &, const Uptane::OfflineUpdateFetcher &) override {
+  data::InstallationResult putMetadataOffUpd(const Uptane::Target & /*target*/,
+                                             const Uptane::OfflineUpdateFetcher & /*fetcher*/) override {
     return {data::ResultCode::Numeric::kInternalError, "SecondaryInterfaceMock::putMetadataOffUpd not implemented"};
   }
 #endif
@@ -165,7 +166,6 @@ struct TestOptions {
 struct TestScaffolding {
   explicit TestScaffolding(TestOptions test_options = TestOptions())
       : conf{"tests/config/basic.toml"},
-        temp_dir{},
         http{std::make_shared<HttpFake>(temp_dir.Path(), "hasupdates")},
         events_channel{std::make_shared<event::Channel>()} {
     conf.provision.primary_ecu_serial = "CA:FE:A6:D2:84:9D";

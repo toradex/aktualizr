@@ -45,7 +45,19 @@ Aktualizr::Aktualizr(Config config, std::shared_ptr<INvStorage> storage_in,
 Aktualizr::~Aktualizr() { api_queue_.reset(nullptr); }
 
 void Aktualizr::Initialize() {
+  bool update_was_in_progress = storage_->hasPendingInstall();
+  // bool was_offine = storage_->OfflineLogsPath()
+  // Check path exists
+  // Grab journal cursor
+
   uptane_client_->initialize();
+  if (update_was_in_progress) {
+    // Read if there was a offline update
+    LOG_INFO << "Writing logs out..";
+    // Write out everything from the cursor above to now
+    // Write out manifest from SotaUptaneClient
+    //
+  }
   api_queue_->run();
 }
 
@@ -263,6 +275,8 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
           next_online_poll_ = now + std::chrono::seconds(config_.uptane.polling_sec);
           auto put_manifest_result = op_put_manifest_.get();
 
+          // TODO: Phase 6 will integrate OfflineLogsManager here via SotaUptaneClient
+
           if (put_manifest_result.status == result::PutManifestStatus::kUnprovisioned) {
             LOG_INFO << "Didn't put manifest to server because the device was not able to provision";
             // We can get to this state when doing an offline update
@@ -384,12 +398,16 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
           state_ = UpdateCycleState::kIdle;
           break;
         }
+        // Record the current journal cursor
+        // Record the location of the offline logs file
+        // storage_->storageOfflineLogsLocation(...);
         op_install_ = Install(download_result.updates, UpdateType::kOffline);
         state_ = UpdateCycleState::kInstallingOffline;
         break;
       }
       case UpdateCycleState::kInstallingOffline: {
         result::Install const install_result = op_install_.get();
+        // TODO: Write the Journal logs out here
         if (uptane_client_->isInstallCompletionRequired()) {
           state_ = UpdateCycleState::kAwaitReboot;
           // In this case the manifest will be sent by SotaUptaneClient::finalizeAfterReboot()

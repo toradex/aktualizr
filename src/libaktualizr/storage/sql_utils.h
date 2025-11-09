@@ -127,7 +127,6 @@ class SQLiteStatement {
 };
 
 // Unique ownership SQLite3 connection
-const extern std::mutex sql_mutex;
 class SQLite3Guard {
  public:
   sqlite3* get() { return handle_.get(); }

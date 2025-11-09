@@ -57,7 +57,8 @@ SotaUptaneClient::SotaUptaneClient(Config &config_in, std::shared_ptr<INvStorage
       uptane_fetcher(new Uptane::Fetcher(config, http)),
       events_channel(std::move(events_channel_in)),
       provisioner_(config.provision, storage, http, key_manager_, secondaries),
-      flow_control_(flow_control) {
+      flow_control_(flow_control),
+      offline_logs_manager_(config_in) {
   report_queue = std_::make_unique<ReportQueue>(config, http, storage);
   secondary_provider_ = SecondaryProviderBuilder::Build(config, storage, package_manager_, http);
 }
@@ -141,6 +142,20 @@ void SotaUptaneClient::finalizeAfterReboot() {
   if (!hasPendingUpdates()) {
     LOG_DEBUG << "No pending updates, continuing with initialization";
     return;
+  }
+
+  // Resume offline logging if there was an offline update in progress before reboot
+  auto offline_update_path = storage->loadOfflineUpdatePath();
+  if (offline_update_path) {
+    std::string device_id;
+    storage->loadDeviceId(&device_id);
+
+    InstallId install_id = offline_logs_manager_.FindAndResumeInstall(*offline_update_path, device_id);
+    if (install_id.IsValid()) {
+      LOG_INFO << "Resumed offline logging for install " << install_id.Value();
+      offline_logs_manager_.CaptureLogs();
+      offline_logs_manager_.CaptureReports(*storage);
+    }
   }
 
   LOG_INFO << "Checking for a pending update to apply for Primary ECU";
@@ -753,6 +768,26 @@ result::Download SotaUptaneClient::downloadImages(const std::vector<Uptane::Targ
   if (utype != UpdateType::kOffline) {
     requiresAlreadyProvisioned();
   }
+
+  // Begin offline logging at the start of the download phase for offline updates
+  if (utype == UpdateType::kOffline && !offline_logs_manager_.HasActiveInstall()) {
+    auto offline_update_path = storage->loadOfflineUpdatePath();
+    if (offline_update_path) {
+      auto correlation_id = director_repo.getCorrelationId();
+      std::string device_id;
+      storage->loadDeviceId(&device_id);
+
+      // Version is derived from the number of targets
+      int update_version = static_cast<int>(targets.size());
+
+      InstallId install_id =
+          offline_logs_manager_.BeginInstall(*offline_update_path, device_id, correlation_id, update_version);
+      if (install_id.IsValid()) {
+        LOG_INFO << "Offline logging started for install " << install_id.Value();
+      }
+    }
+  }
+
   // Uptane step 4 - download all the images and verify them against the metadata (for OSTree - pull without
   // deploying)
   std::lock_guard<std::mutex> guard(download_mutex);
@@ -1311,6 +1346,12 @@ result::Install SotaUptaneClient::uptaneInstall(const std::vector<Uptane::Target
 
   storage->storeDeviceInstallationResult(r.dev_report, raw_report, correlation_id);
 
+  // Capture logs and reports for offline updates before potential reboot
+  if (utype == UpdateType::kOffline && offline_logs_manager_.HasActiveInstall()) {
+    offline_logs_manager_.CaptureLogs();
+    offline_logs_manager_.CaptureReports(*storage);
+  }
+
   sendEvent<event::AllInstallsComplete>(r);
 
   return r;
@@ -1406,6 +1447,21 @@ result::PutManifestResult SotaUptaneClient::putManifestSimple(const Json::Value 
     LOG_INFO << "Connectivity is restored.";
   }
   connected_ = true;
+
+  // Complete offline logging if there was an active install
+  if (offline_logs_manager_.HasActiveInstall()) {
+    // Get the report counter from the ECU report counter
+    std::vector<std::pair<Uptane::EcuSerial, int64_t>> ecu_cnt;
+    int64_t report_counter = 0;
+    if (storage->loadEcuReportCounter(&ecu_cnt) && !ecu_cnt.empty()) {
+      report_counter = ecu_cnt[0].second;
+    }
+
+    offline_logs_manager_.CompleteInstall(report_counter, signed_manifest);
+    storage->clearOfflineUpdatePath();
+    LOG_INFO << "Offline logging completed and update path cleared";
+  }
+
   storage->clearInstallationResults();
   return {manifest, PutManifestStatus::kSuccess};
 }
@@ -1783,15 +1839,6 @@ result::UpdateCheck SotaUptaneClient::fetchMetaOffUpd(const boost::filesystem::p
   uptane_fetcher_offupd = std::make_shared<Uptane::OfflineUpdateFetcher>(source_path);
   LOG_INFO << "fetchMetaOffUpd() called with source_path: " << source_path;
 
-  // TODO: [OFFUPD] What do we need from below?
-  // reportNetworkInfo();
-  //
-  // if (hasPendingUpdates()) {
-  //   // if there are some pending updates check if the Secondaries' pending updates have been applied
-  //   LOG_INFO << "The current update is pending. Check if pending ECUs has been already updated";
-  //   checkAndUpdatePendingSecondaries();
-  // }
-
   if (hasPendingUpdates()) {
     // if there are still some pending updates just return, don't check for new updates
     // no need in update checking if there are some pending updates
@@ -1799,12 +1846,13 @@ result::UpdateCheck SotaUptaneClient::fetchMetaOffUpd(const boost::filesystem::p
     return {{}, 0, result::UpdateStatus::kError, "There are pending updates, no new updates are checked"};
   }
 
-  // // Uptane step 1 (build the vehicle version manifest):
-  // if (!putManifestSimple()) {
-  //   LOG_ERROR << "Error sending manifest!";
-  // }
-
   result = checkUpdates(UpdateType::kOffline);
+
+  // If updates are available, persist the update path for resume after reboot
+  if (result.status == result::UpdateStatus::kUpdatesAvailable) {
+    storage->storeOfflineUpdatePath(source_path);
+  }
+
   sendEvent<event::UpdateCheckComplete>(result);
 
   return result;

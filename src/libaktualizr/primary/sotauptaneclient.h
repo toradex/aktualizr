@@ -25,6 +25,7 @@
 #include "libaktualizr/types.h"
 #include "logging/logging.h"
 #include "primary/consent.h"
+#include "primary/offline_logs_manager.h"
 #include "provisioner.h"
 #include "reportqueue.h"
 #include "uptane/directorrepository.h"
@@ -237,6 +238,7 @@ class SotaUptaneClient {
   Json::Value custom_hardware_info_{Json::nullValue};
   const api::FlowControlToken *flow_control_;
   bool connected_{true};
+  OfflineLogsManager offline_logs_manager_;
 };
 
 #endif  // SOTA_UPTANE_CLIENT_H_

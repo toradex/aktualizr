@@ -11,6 +11,7 @@ set(SOURCES aktualizr.cc
 set(HEADERS aktualizr_helpers.h
             consent.h
             dbus.h
+            offline_logs_manager.h
             provisioner.h
             reportqueue.h
             secondary_config.h
@@ -30,6 +31,11 @@ else (BUILD_DBUS)
     aktualizr_source_file_checks(dbus.cc)
 endif(BUILD_DBUS)
 
+if (BUILD_OFFLINE_UPDATES)
+    list(APPEND SOURCES offline_logs_manager.cc)
+else (BUILD_OFFLINE_UPDATES)
+    aktualizr_source_file_checks(offline_logs_manager.cc)
+endif(BUILD_OFFLINE_UPDATES)
 
 add_library(primary OBJECT ${SOURCES})
 if (BUILD_DBUS)
@@ -163,6 +169,16 @@ endif(BUILD_DBUS)
 
 add_aktualizr_test(NAME aktualizr_consent
                    SOURCES aktualizr_consent_test.cc
+                   PROJECT_WORKING_DIRECTORY
+                   LIBRARIES uptane_generator_lib virtual_secondary)
+
+add_aktualizr_test(NAME aktualizr_offline_update
+                   SOURCES aktualizr_offline_update_test.cc
+                   PROJECT_WORKING_DIRECTORY
+                   LIBRARIES uptane_generator_lib virtual_secondary)
+
+add_aktualizr_test(NAME sotauptaneclient_offline
+                   SOURCES sotauptaneclient_offline_test.cc
                    PROJECT_WORKING_DIRECTORY
                    LIBRARIES uptane_generator_lib virtual_secondary)
 
