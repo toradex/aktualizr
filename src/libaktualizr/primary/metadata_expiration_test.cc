@@ -2,6 +2,7 @@
 
 #include <boost/algorithm/hex.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
+#include <chrono>
 #include <string>
 
 #include "crypto/crypto.h"
@@ -10,7 +11,7 @@
 #include "test_utils.h"
 #include "uptane_test_common.h"
 
-boost::filesystem::path uptane_generator_path;
+boost::filesystem::path uptane_generator_path;  // NOLINT
 
 class MetadataExpirationTest : public ::testing::Test {
  protected:
@@ -80,9 +81,9 @@ class MetadataExpirationTest : public ::testing::Test {
     client_ = aktualizr_->uptane_client();
   }
 
- protected:
   Process uptane_gen_;
   const std::string target_filename_ = "firmware.txt";
+  const int expiration_in_sec_ = 10;
   std::string target_image_hash_;
 
   TemporaryDirectory meta_dir_;
@@ -144,9 +145,8 @@ TEST_F(MetadataExpirationTest, MetadataExpirationAfterInstallationAndBeforeReboo
   result::UpdateCheck update_result = aktualizr_->CheckUpdates().get();
   EXPECT_EQ(update_result.status, result::UpdateStatus::kNoUpdatesAvailable);
 
-  const int expiration_in_sec = 5;
-  addTargetToInstall(expiration_in_sec);
-  auto target_init_time = std::chrono::system_clock::now();
+  addTargetToInstall(expiration_in_sec_);
+  auto start_time = std::chrono::system_clock::now();
 
   // run the uptane cycle to install the target
   aktualizr_->UptaneCycle();
@@ -156,8 +156,7 @@ TEST_F(MetadataExpirationTest, MetadataExpirationAfterInstallationAndBeforeReboo
   ASSERT_TRUE(client_->isInstallCompletionRequired());
 
   // emulate the target metadata expiration while the uptane cycle is running
-  std::this_thread::sleep_for(std::chrono::seconds(expiration_in_sec) -
-                              (std::chrono::system_clock::now() - target_init_time));
+  std::this_thread::sleep_until(start_time + std::chrono::seconds(expiration_in_sec_ + 2));
   aktualizr_->UptaneCycle();
 
   // since the installation happenned before the metadata expiration we expect that
@@ -188,9 +187,8 @@ TEST_F(MetadataExpirationTest, MetadataExpirationAfterInstallationAndBeforeAppli
   result::UpdateCheck update_result = aktualizr_->CheckUpdates().get();
   EXPECT_EQ(update_result.status, result::UpdateStatus::kNoUpdatesAvailable);
 
-  const int expiration_in_sec = 5;
-  addTargetToInstall(expiration_in_sec);
-  auto target_init_time = std::chrono::system_clock::now();
+  addTargetToInstall(expiration_in_sec_);
+  auto start_time = std::chrono::system_clock::now();
 
   // run the uptane cycle to install the target
   aktualizr_->UptaneCycle();
@@ -201,8 +199,7 @@ TEST_F(MetadataExpirationTest, MetadataExpirationAfterInstallationAndBeforeAppli
 
   // wait until the target metadata are expired
   // emulate the target metadata expiration while the Uptane cycle is running
-  std::this_thread::sleep_for(std::chrono::seconds(expiration_in_sec) -
-                              (std::chrono::system_clock::now() - target_init_time));
+  std::this_thread::sleep_until(start_time + std::chrono::seconds(expiration_in_sec_ + 2));
 
   // force reboot
   client_->completeInstall();
@@ -221,9 +218,11 @@ TEST_F(MetadataExpirationTest, MetadataExpirationAfterInstallationAndBeforeAppli
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   if (argc != 2) {
+    // NOLINTNEXTLINE
     std::cerr << "Error: " << argv[0] << " requires the path to the uptane-generator utility\n";
     return EXIT_FAILURE;
   }
+  // NOLINTNEXTLINE
   uptane_generator_path = argv[1];
 
   logger_init();
