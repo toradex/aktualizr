@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <libaktualizr/results.h>
 
 #include <chrono>
 #include <future>
@@ -2117,7 +2118,8 @@ TEST(Aktualizr, ManifestCustom) {
     aktualizr.Initialize();
     Json::Value custom = Utils::parseJSON(R"({"test_field":"test_value"})");
     ASSERT_EQ(custom["test_field"].asString(), "test_value");  // Shouldn't fail, just check that test itself is correct
-    ASSERT_EQ(true, aktualizr.SendManifest(custom).get()) << "Failed to upload manifest with HttpFake server";
+    ASSERT_EQ(aktualizr.SendManifest(custom).get().status, result::PutManifestStatus::kSuccess)
+        << "Failed to upload manifest with HttpFake server";
     EXPECT_EQ(http->last_manifest["signed"]["custom"], custom);
   }
 }

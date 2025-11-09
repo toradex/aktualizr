@@ -1,8 +1,10 @@
 #include "libaktualizr/results.h"
+#include <ostream>
 
 namespace result {
 
 using result::DownloadStatus;
+using result::PutManifestStatus;
 using result::UpdateStatus;
 
 std::ostream& operator<<(std::ostream& os, UpdateStatus update_status) {
@@ -42,6 +44,29 @@ std::ostream& operator<<(std::ostream& os, const DownloadStatus stat) {
       break;
   }
   os << "\"";
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const PutManifestStatus status) {
+  switch (status) {
+    case PutManifestStatus::kSuccess:
+      os << "Success";
+      break;
+    case PutManifestStatus::kUpdateAlreadyPending:
+      os << "Update Already Pending";
+      break;
+    case PutManifestStatus::kNoNetwork:
+      os << "No Network";
+      break;
+    case PutManifestStatus::kUnprovisioned:
+      os << "Unprovisioned";
+      break;
+    case PutManifestStatus::kCanceled:
+      os << "Cancelled";
+      break;
+    default:
+      os << "Unknown PutManifestStatus(" << static_cast<int>(status) << ")";
+  }
   return os;
 }
 

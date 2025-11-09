@@ -2,6 +2,7 @@
 #define RESULTS_H_
 /** \file */
 
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -125,6 +126,26 @@ class Install {
     Uptane::EcuSerial serial;
     data::InstallationResult install_res;
   };
+};
+
+enum class PutManifestStatus {
+  kSuccess = 0,
+  kUpdateAlreadyPending,
+  kNoNetwork,
+  kUnprovisioned,
+  kCanceled,
+};
+
+std::ostream& operator<<(std::ostream& os, PutManifestStatus put_manifest_status);
+
+/**
+ * The result of a putManifest operation: the assembled manifest and whether it was sent successfully.
+ */
+struct PutManifestResult {
+  Uptane::Manifest manifest;
+  PutManifestStatus status{PutManifestStatus::kSuccess};
+
+  bool success() const { return status == PutManifestStatus::kSuccess; }
 };
 
 }  // namespace result

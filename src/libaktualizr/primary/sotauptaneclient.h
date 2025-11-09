@@ -81,7 +81,7 @@ class SotaUptaneClient {
   void reportConsentOutcome(const Consent::Outcome &consent_outcome);
   void sendDeviceData();
   result::UpdateCheck fetchMeta();
-  bool putManifest(const Json::Value &custom = Json::nullValue);
+  result::PutManifestResult putManifest(const Json::Value &custom = Json::nullValue);
   result::Install uptaneInstall(const std::vector<Uptane::Target> &updates, UpdateType utype = UpdateType::kOnline);
   result::CampaignCheck campaignCheck();
   void campaignAccept(const std::string &campaign_id);
@@ -186,7 +186,7 @@ class SotaUptaneClient {
   void sendMetadataToEcus(const std::vector<Uptane::Target> &targets, data::InstallationResult *result,
                           std::string *raw_installation_report, UpdateType utype);
 
-  bool putManifestSimple(const Json::Value &custom = Json::nullValue);
+  result::PutManifestResult putManifestSimple(const Json::Value &custom = Json::nullValue);
   void getNewTargets(std::vector<Uptane::Target> *new_targets, unsigned int *ecus_count = nullptr);
   void updateDirectorMeta(UpdateType utype = UpdateType::kOnline);
   void updateImageMeta(UpdateType utype = UpdateType::kOnline);
@@ -236,6 +236,7 @@ class SotaUptaneClient {
   Provisioner provisioner_;
   Json::Value custom_hardware_info_{Json::nullValue};
   const api::FlowControlToken *flow_control_;
+  bool connected_{true};
 };
 
 #endif  // SOTA_UPTANE_CLIENT_H_

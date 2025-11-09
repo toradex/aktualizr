@@ -279,7 +279,7 @@ class Aktualizr {
    * All these manifests will not include the custom data provided in this call.
    *
    * @param custom Project-specific data to put in the custom field of Uptane manifest
-   * @return std::future object with manifest update result (true on success).
+   * @return std::future object containing the manifest and upload result.
    *
    * @throw SQLException
    * @throw std::bad_alloc (memory allocation failure)
@@ -287,7 +287,7 @@ class Aktualizr {
    * @throw std::system_error (failure to lock a mutex)
    * @throw SotaUptaneClient::ProvisioningFailed (on-line provisioning failed)
    */
-  std::future<bool> SendManifest(const Json::Value& custom = Json::nullValue);
+  std::future<result::PutManifestResult> SendManifest(const Json::Value& custom = Json::nullValue);
 
   /**
    * Pause the library operations.
@@ -468,7 +468,8 @@ class Aktualizr {
   UpdateCycleState state_{UpdateCycleState::kUnprovisioned};
   // These hold a running operation for the current state
   std::future<void> op_void_;
-  std::future<bool> op_bool_;
+  std::future<bool> op_provision_;
+  std::future<result::PutManifestResult> op_put_manifest_;
   std::future<result::UpdateCheck> op_update_check_;
   std::future<Consent::Outcome> op_consent_;
   std::future<result::Download> op_download_;

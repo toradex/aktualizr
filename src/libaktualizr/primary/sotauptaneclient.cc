@@ -9,6 +9,7 @@
 #include "crypto/crypto.h"
 #include "crypto/keymanager.h"
 #include "libaktualizr/campaign.h"
+#include "libaktualizr/results.h"
 #include "libaktualizr/types.h"
 #include "logging/logging.h"
 #include "primary/reportqueue.h"
@@ -998,7 +999,7 @@ result::UpdateCheck SotaUptaneClient::fetchMeta() {
   }
 
   // Uptane step 1 (build the vehicle version manifest):
-  if (!putManifestSimple()) {
+  if (!putManifestSimple().success()) {
     LOG_ERROR << "Error sending manifest!";
   }
   auto result = checkUpdates();
@@ -1379,44 +1380,44 @@ void SotaUptaneClient::completePreviousSecondaryUpdates() {
   }
 }
 
-bool SotaUptaneClient::putManifestSimple(const Json::Value &custom) {
+result::PutManifestResult SotaUptaneClient::putManifestSimple(const Json::Value &custom) {
+  using result::PutManifestStatus;
   // does not send event, so it can be used as a subset of other steps
   if (hasPendingUpdates()) {
     // Debug level here because info level is annoying if the update check
     // frequency is low.
     LOG_DEBUG << "An update is pending. Skipping manifest upload until installation is complete.";
-    return false;
+    return {Uptane::Manifest(), PutManifestStatus::kUpdateAlreadyPending};
   }
 
-  static bool connected = true;
   auto manifest = AssembleManifest();
   if (!custom.empty()) {
     manifest["custom"] = custom;
   }
+
   auto signed_manifest = uptane_manifest->sign(manifest);
   HttpResponse response = http->put(config.uptane.director_server + "/manifest", signed_manifest);
-  if (response.isOk()) {
-    if (!connected) {
-      LOG_INFO << "Connectivity is restored.";
-    }
-    connected = true;
-    storage->clearInstallationResults();
-
-    return true;
-  } else {
-    connected = false;
+  if (!response.isOk()) {
+    connected_ = false;
+    LOG_WARNING << "Put manifest request failed: " << response.getStatusStr();
+    return {manifest, PutManifestStatus::kNoNetwork};
   }
-
-  LOG_WARNING << "Put manifest request failed: " << response.getStatusStr();
-  return false;
+  if (!connected_) {
+    LOG_INFO << "Connectivity is restored.";
+  }
+  connected_ = true;
+  storage->clearInstallationResults();
+  return {manifest, PutManifestStatus::kSuccess};
 }
 
-bool SotaUptaneClient::putManifest(const Json::Value &custom) {
-  requiresProvision();
+result::PutManifestResult SotaUptaneClient::putManifest(const Json::Value &custom) {
+  if (!attemptProvision()) {
+    return {Uptane::Manifest(), result::PutManifestStatus::kUnprovisioned};
+  }
 
-  bool success = putManifestSimple(custom);
-  sendEvent<event::PutManifestComplete>(success);
-  return success;
+  auto result = putManifestSimple(custom);
+  sendEvent<event::PutManifestComplete>(result.status == result::PutManifestStatus::kSuccess);
+  return result;
 }
 
 bool SotaUptaneClient::waitSecondariesReachable(const std::vector<Uptane::Target> &updates) {

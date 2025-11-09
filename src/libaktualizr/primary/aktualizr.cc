@@ -193,10 +193,10 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
     switch (state_) {
       case UpdateCycleState::kUnprovisioned:
         update_lock_file_.UpdateComplete();
-        if (next_online_poll_ <= now && !op_bool_.valid()) {
-          op_bool_ = AttemptProvision();
-        } else if (op_bool_.valid() && op_bool_.wait_until(next_offline_poll_) == std::future_status::ready) {
-          if (op_bool_.get()) {
+        if (next_online_poll_ <= now && !op_provision_.valid()) {
+          op_provision_ = AttemptProvision();
+        } else if (op_provision_.valid() && op_provision_.wait_until(next_offline_poll_) == std::future_status::ready) {
+          if (op_provision_.get()) {
             // Provisioned OK, send device data
             op_void_ = SendDeviceData();
             state_ = UpdateCycleState::kSendingDeviceData;
@@ -204,7 +204,7 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
             // If we didn't provision, then stay in this state. We'll wait until next_online_poll_ before trying again
             next_online_poll_ = now + std::chrono::seconds(config_.uptane.polling_sec);
           }
-          op_bool_ = {};  // Clear future
+          op_provision_ = {};  // Clear future
         } else {
           // Idle but unprovisioned
           std::unique_lock<std::mutex> guard{exit_cond_.m};
@@ -259,15 +259,16 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
         }
         break;
       case UpdateCycleState::kSendingManifest:
-        if (op_bool_.wait_until(next_offline_poll_) == std::future_status::ready) {
+        if (op_put_manifest_.wait_until(next_offline_poll_) == std::future_status::ready) {
           next_online_poll_ = now + std::chrono::seconds(config_.uptane.polling_sec);
-          try {
-            op_bool_.get();
-            state_ = UpdateCycleState::kIdle;
-          } catch (SotaUptaneClient::ProvisioningFailed &) {
+          auto put_manifest_result = op_put_manifest_.get();
+
+          if (put_manifest_result.status == result::PutManifestStatus::kUnprovisioned) {
             LOG_INFO << "Didn't put manifest to server because the device was not able to provision";
             // We can get to this state when doing an offline update
             state_ = UpdateCycleState::kUnprovisioned;
+          } else {
+            state_ = UpdateCycleState::kIdle;
           }
         }
         break;
@@ -281,7 +282,7 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
           }
           if (update_result_.updates.empty()) {
             if (update_result_.status == result::UpdateStatus::kError) {
-              op_bool_ = SendManifest();
+              op_put_manifest_ = SendManifest();
               state_ = UpdateCycleState::kSendingManifest;
               break;
             }
@@ -326,7 +327,7 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
           if (download_result.status != result::DownloadStatus::kSuccess || download_result.updates.empty()) {
             if (download_result.status != result::DownloadStatus::kNothingToDownload) {
               // If the download failed, inform the backend immediately.
-              op_bool_ = SendManifest();
+              op_put_manifest_ = SendManifest();
               state_ = UpdateCycleState::kSendingManifest;
               break;
             }
@@ -347,7 +348,7 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
           if (!uptane_client_->hasPendingUpdates()) {
             // If updates were applied and no any reboot/finalization is required then send/put manifest
             // as soon as possible, don't wait for config_.uptane.polling_sec
-            op_bool_ = SendManifest();
+            op_put_manifest_ = SendManifest();
             state_ = UpdateCycleState::kSendingManifest;
             break;
           }
@@ -364,7 +365,7 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
           break;
         }
         if (update_result_.status == result::UpdateStatus::kError) {
-          op_bool_ = SendManifest();
+          op_put_manifest_ = SendManifest();
           state_ = UpdateCycleState::kSendingManifest;
           break;
         }
@@ -376,7 +377,7 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
         result::Download const download_result = op_download_.get();
         if (download_result.status != result::DownloadStatus::kSuccess || download_result.updates.empty()) {
           if (download_result.status != result::DownloadStatus::kNothingToDownload) {
-            op_bool_ = SendManifest();
+            op_put_manifest_ = SendManifest();
             state_ = UpdateCycleState::kSendingManifest;
             break;
           }
@@ -407,7 +408,7 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
         //    is true if any ecu is pending. I'm not aware of any system that can get into this
         //    state.
         // Kick off a manifest send now anyway
-        op_bool_ = SendManifest();
+        op_put_manifest_ = SendManifest();
         state_ = UpdateCycleState::kSendingManifest;
         break;
       }
@@ -527,9 +528,9 @@ bool Aktualizr::SetInstallationRawReport(const std::string &custom_raw_report) {
   return storage_->storeDeviceInstallationRawReport(custom_raw_report);
 }
 
-std::future<bool> Aktualizr::SendManifest(const Json::Value &custom) {
-  std::function<bool()> task([this, custom]() { return uptane_client_->putManifest(custom); });
-  return api_queue_->enqueue(std::move(task), false);
+std::future<result::PutManifestResult> Aktualizr::SendManifest(const Json::Value &custom) {
+  std::function<result::PutManifestResult()> task([this, custom]() { return uptane_client_->putManifest(custom); });
+  return api_queue_->enqueue(std::move(task), {Uptane::Manifest(), result::PutManifestStatus::kCanceled});
 }
 
 result::Pause Aktualizr::Pause() {

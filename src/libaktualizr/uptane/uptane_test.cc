@@ -1,6 +1,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <libaktualizr/results.h>
 #include <libaktualizr/types.h>
 #include <unistd.h>
 
@@ -229,7 +230,7 @@ TEST(Uptane, PutManifest) {
 
   auto sota_client = std_::make_unique<UptaneTestCommon::TestUptaneClient>(config, storage, http);
   EXPECT_NO_THROW(sota_client->initialize());
-  EXPECT_TRUE(sota_client->putManifestSimple());
+  EXPECT_EQ(sota_client->putManifestSimple().status, result::PutManifestStatus::kSuccess);
 
   Json::Value json = http->last_manifest;
 
@@ -283,7 +284,7 @@ TEST(Uptane, PutManifestError) {
   auto sota_client = std_::make_unique<UptaneTestCommon::TestUptaneClient>(conf, storage, http, events_channel);
   EXPECT_NO_THROW(sota_client->initialize());
   auto result = sota_client->putManifest();
-  EXPECT_FALSE(result);
+  EXPECT_EQ(result.status, result::PutManifestStatus::kNoNetwork);
   EXPECT_EQ(num_events_PutManifestError, 1);
 }
 

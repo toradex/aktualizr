@@ -1,5 +1,4 @@
 #include "libaktualizr-c.h"
-#include <fstream>
 
 #include "libaktualizr/events.h"
 #include "utilities/utils.h"
@@ -178,8 +177,8 @@ int Aktualizr_install_target(Aktualizr *a, Target *t) {
 int Aktualizr_send_manifest(Aktualizr *a, const char *manifest) {
   try {
     Json::Value custom = Utils::parseJSON(manifest);
-    bool r = a->SendManifest(custom).get();
-    return r ? 0 : -1;
+    auto result = a->SendManifest(custom).get();
+    return result.success() ? 0 : -1;
   } catch (const std::exception &e) {
     std::cerr << "Aktualizr_send_manifest exception: " << e.what() << std::endl;
     return -1;

@@ -405,7 +405,7 @@ TEST(UptaneUpdateFailure, PrimaryInstallFailureNoReboot) {
   EXPECT_EQ(s.secondary->install_calls, 0);
 
   // Check the manifest that was reported to the backend
-  s.dut->putManifest();
+  auto manifest_result = s.dut->putManifest();
   auto manifest = s.http->last_manifest["signed"];
   auto report = manifest["installation_report"];
 
@@ -437,6 +437,9 @@ TEST(UptaneUpdateFailure, PrimaryInstallFailureNoReboot) {
           }
   })");
   EXPECT_EQ(expected_report, report);
+
+  // Also check what was sent to server matches what we got back
+  EXPECT_EQ(manifest_result.manifest, manifest);
 }
 
 /**
