@@ -186,3 +186,58 @@ std::vector<std::string> ImageRepo::getDelegationTargets(const Uptane::Role &nam
   }
   return result;
 }
+
+void ImageRepo::exportToLockBox(const boost::filesystem::path &lockbox_path) {
+  const boost::filesystem::path repo_dir = path_ / ImageRepo::dir;
+  const boost::filesystem::path lockbox_metadata_dir = lockbox_path / "metadata" / "image-repo";
+
+  // Create the lockbox directory structure
+  boost::filesystem::create_directories(lockbox_metadata_dir);
+
+  // Copy all root metadata files (1.root.json, 2.root.json, etc.)
+  if (boost::filesystem::exists(repo_dir)) {
+    for (auto &entry : boost::filesystem::directory_iterator(repo_dir)) {
+      if (!boost::filesystem::is_regular_file(entry)) {
+        continue;
+      }
+
+      std::string filename = entry.path().filename().string();
+
+      // Copy all versioned root files
+      if (filename.find(".root.json") != std::string::npos) {
+        boost::filesystem::copy_file(entry.path(), lockbox_metadata_dir / filename,
+                                     boost::filesystem::copy_options::overwrite_existing);
+      }
+    }
+  }
+
+  // Copy snapshot.json
+  const boost::filesystem::path snapshot_file = repo_dir / "snapshot.json";
+  if (boost::filesystem::exists(snapshot_file)) {
+    boost::filesystem::copy_file(snapshot_file, lockbox_metadata_dir / "snapshot.json",
+                                 boost::filesystem::copy_options::overwrite_existing);
+  } else {
+    throw std::runtime_error("Image repository snapshot.json not found");
+  }
+
+  // Copy targets.json
+  const boost::filesystem::path targets_file = repo_dir / "targets.json";
+  if (boost::filesystem::exists(targets_file)) {
+    boost::filesystem::copy_file(targets_file, lockbox_metadata_dir / "targets.json",
+                                 boost::filesystem::copy_options::overwrite_existing);
+  } else {
+    throw std::runtime_error("Image repository targets.json not found");
+  }
+
+  // Copy all delegation files
+  const boost::filesystem::path delegations_dir = repo_dir / "delegations";
+  if (boost::filesystem::exists(delegations_dir) && boost::filesystem::is_directory(delegations_dir)) {
+    for (auto &entry : boost::filesystem::directory_iterator(delegations_dir)) {
+      if (boost::filesystem::is_regular_file(entry) && entry.path().extension() == ".json") {
+        std::string filename = entry.path().filename().string();
+        boost::filesystem::copy_file(entry.path(), lockbox_metadata_dir / filename,
+                                     boost::filesystem::copy_options::overwrite_existing);
+      }
+    }
+  }
+}

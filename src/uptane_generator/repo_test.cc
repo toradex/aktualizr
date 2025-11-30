@@ -12,6 +12,7 @@
 #include "uptane/exceptions.h"
 #include "uptane_repo.h"
 
+namespace fs = boost::filesystem;
 KeyType key_type = KeyType::kED25519;
 std::string generate_repo_exec;
 
@@ -675,6 +676,119 @@ TEST(uptane_generator, rotateDirectorRoot) { test_rotation(Uptane::RepositoryTyp
  * Rotate the Image repo Root.
  */
 TEST(uptane_generator, rotateImageRoot) { test_rotation(Uptane::RepositoryType::Image()); }
+
+namespace {
+
+struct ExpectedFile {
+  std::string rel_path;
+  std::string expected_type;
+};
+
+void CheckExpectedFilesMatch(const fs::path &root, std::vector<ExpectedFile> expected_files) {
+  for (const auto &expected : expected_files) {
+    boost::filesystem::path file_path = root / expected.rel_path;
+    EXPECT_TRUE(boost::filesystem::exists(file_path)) << "Missing file: " << expected.rel_path;
+
+    if (boost::filesystem::exists(file_path)) {
+      auto content = Utils::readFile(file_path);
+      auto json = Utils::parseJSON(content);
+      EXPECT_EQ(json["signed"]["_type"].asString(), expected.expected_type)
+          << "Wrong type for file: " << expected.rel_path;
+    }
+  }
+};
+
+}  // namespace
+
+/*
+ * Export a basic lockbox and verify it contains Image repository metadata.
+ */
+TEST(uptane_generator, exportLockBoxSimple) {
+  TemporaryDirectory temp_dir;
+  boost::filesystem::path lockbox_dir = temp_dir.Path() / "lockbox";
+
+  UptaneRepo repo(temp_dir.Path(), "2029-07-04T16:33:27Z", "test-correlation-id");
+  repo.generateRepo(key_type);
+
+  // Add a test image
+  auto firmware_path = temp_dir.Path() / "targets" / "test_firmware.bin";
+  boost::filesystem::create_directories(firmware_path.parent_path());
+  Utils::writeFile(firmware_path, std::string("test firmware content"));
+  repo.addImage(firmware_path, "test_firmware.bin", "test_hw");
+
+  // Add offline update target
+  repo.addOfflineUpdateTarget("test_firmware.bin", "test_hw", "test_lockbox", "2029-06-01T00:00:00Z");
+  repo.signOfflineTargets("test_lockbox");
+
+  // Export lockbox
+  repo.exportLockBox(lockbox_dir, {"test_lockbox"}, "2029-06-01T00:00:00Z");
+
+  // Verify lockbox contains all expected files with correct metadata types
+  std::vector<ExpectedFile> expected_files = {{"metadata/director/1.root.json", "Root"},
+                                              {"metadata/director/offline-snapshot.json", "Offline-Snapshot"},
+                                              {"metadata/director/test_lockbox.json", "Offline-Updates"},
+                                              {"metadata/image-repo/1.root.json", "Root"},
+                                              {"metadata/image-repo/snapshot.json", "Snapshot"},
+                                              {"metadata/image-repo/targets.json", "Targets"}};
+
+  CheckExpectedFilesMatch(lockbox_dir, expected_files);
+
+  // Verify Image repo root version
+  auto image_root_json = Utils::parseJSON(Utils::readFile(lockbox_dir / "metadata" / "image-repo" / "1.root.json"));
+  EXPECT_EQ(image_root_json["signed"]["version"].asUInt(), 1);
+
+  // Verify Image repo targets contains our image
+  auto image_targets_json = Utils::parseJSON(Utils::readFile(lockbox_dir / "metadata" / "image-repo" / "targets.json"));
+  EXPECT_TRUE(image_targets_json["signed"]["targets"].isMember("test_firmware.bin"));
+  EXPECT_EQ(image_targets_json["signed"]["targets"]["test_firmware.bin"]["length"].asUInt(), 21);
+}
+
+/*
+ * Export a lockbox after root rotation and verify multiple root versions are exported.
+ */
+TEST(uptane_generator, exportLockBoxWithRotatedRoots) {
+  TemporaryDirectory temp_dir;
+  boost::filesystem::path lockbox_dir = temp_dir.Path() / "lockbox";
+
+  UptaneRepo repo(temp_dir.Path(), "2029-07-04T16:33:27Z", "test-correlation-id");
+  repo.generateRepo(key_type);
+
+  // Rotate both Director and Image repo roots
+  repo.rotate(Uptane::RepositoryType::Director(), Uptane::Role::Root(), key_type);
+  repo.rotate(Uptane::RepositoryType::Image(), Uptane::Role::Root(), key_type);
+
+  // Add a test image
+  auto firmware_path = temp_dir.Path() / "targets" / "test_firmware.bin";
+  boost::filesystem::create_directories(firmware_path.parent_path());
+  Utils::writeFile(firmware_path, std::string("test firmware content"));
+  repo.addImage(firmware_path, "test_firmware.bin", "test_hw");
+
+  // Add offline update target
+  repo.addOfflineUpdateTarget("test_firmware.bin", "test_hw", "test_lockbox", "2029-06-01T00:00:00Z");
+  repo.signOfflineTargets("test_lockbox");
+
+  // Export lockbox
+  repo.exportLockBox(lockbox_dir, {"test_lockbox"}, "2029-06-01T00:00:00Z");
+
+  std::vector<ExpectedFile> expected_files = {{"metadata/director/1.root.json", "Root"},
+                                              {"metadata/director/2.root.json", "Root"},
+                                              {"metadata/director/offline-snapshot.json", "Offline-Snapshot"},
+                                              {"metadata/director/test_lockbox.json", "Offline-Updates"},
+                                              {"metadata/image-repo/1.root.json", "Root"},
+                                              {"metadata/image-repo/2.root.json", "Root"},
+                                              {"metadata/image-repo/snapshot.json", "Snapshot"},
+                                              {"metadata/image-repo/targets.json", "Targets"}};
+
+  // Verify all expected files exist and have correct type
+  CheckExpectedFilesMatch(lockbox_dir, expected_files);
+
+  // Verify root versions
+  auto image_root1 = Utils::parseJSON(Utils::readFile(lockbox_dir / "metadata" / "image-repo" / "1.root.json"));
+  EXPECT_EQ(image_root1["signed"]["version"].asUInt(), 1);
+
+  auto image_root2 = Utils::parseJSON(Utils::readFile(lockbox_dir / "metadata" / "image-repo" / "2.root.json"));
+  EXPECT_EQ(image_root2["signed"]["version"].asUInt(), 2);
+}
 
 #ifndef __NO_MAIN__
 int main(int argc, char **argv) {

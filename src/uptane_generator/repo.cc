@@ -158,6 +158,12 @@ void Repo::generateRepoKeys(KeyType key_type) {
   generateKeyPair(key_type, Uptane::Role::Snapshot());
   generateKeyPair(key_type, Uptane::Role::Targets());
   generateKeyPair(key_type, Uptane::Role::Timestamp());
+
+  // Generate keys for offline updates (only for Director repo)
+  if (repo_type_ == Uptane::RepositoryType::Director()) {
+    generateKeyPair(key_type, Uptane::Role::OfflineSnapshot());
+    generateKeyPair(key_type, Uptane::Role::OfflineUpdates());
+  }
 }
 
 void Repo::generateRepo(KeyType key_type) {
@@ -189,6 +195,17 @@ void Repo::generateRepo(KeyType key_type) {
   role["keyids"].clear();
   role["keyids"].append(keys_[Uptane::Role::Timestamp()].public_key.KeyId());
   root["roles"]["timestamp"] = role;
+
+  // Add offline update roles for Director repo
+  if (repo_type_ == Uptane::RepositoryType::Director()) {
+    role["keyids"].clear();
+    role["keyids"].append(keys_[Uptane::Role::OfflineSnapshot()].public_key.KeyId());
+    root["roles"]["offline-snapshot"] = role;
+
+    role["keyids"].clear();
+    role["keyids"].append(keys_[Uptane::Role::OfflineUpdates()].public_key.KeyId());
+    root["roles"]["offline-updates"] = role;
+  }
 
   const std::string signed_root = Utils::jsonToCanonicalStr(signTuf(Uptane::Role::Root(), root));
   Utils::writeFile(repo_dir_ / "root.json", signed_root);

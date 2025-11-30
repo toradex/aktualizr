@@ -60,3 +60,23 @@ void UptaneRepo::rotate(Uptane::RepositoryType repo_type, const Uptane::Role &ro
     image_repo_.rotate(role, key_type);
   }
 }
+
+void UptaneRepo::addOfflineUpdateTarget(const std::string &target_name, const std::string &hardware_id,
+                                        const std::string &offline_targets_name, const std::string &expires) {
+  auto target = image_repo_.getTarget(target_name);
+  if (target.empty()) {
+    throw std::runtime_error("No such " + target_name + " target in the image repository");
+  }
+  director_repo_.addOfflineUpdateTarget(target_name, target, hardware_id, offline_targets_name, expires);
+}
+
+void UptaneRepo::signOfflineTargets(const std::string &offline_targets_name) {
+  director_repo_.signOfflineTargets(offline_targets_name);
+}
+
+void UptaneRepo::exportLockBox(const boost::filesystem::path &lockbox_path,
+                               const std::vector<std::string> &offline_targets_names,
+                               const std::string &snapshot_expires) {
+  director_repo_.exportLockBox(lockbox_path, offline_targets_names, snapshot_expires);
+  image_repo_.exportToLockBox(lockbox_path);
+}

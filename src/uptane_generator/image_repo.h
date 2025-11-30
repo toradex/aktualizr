@@ -17,6 +17,7 @@ class ImageRepo : public Repo {
                      bool terminating, KeyType key_type);
   void revokeDelegation(const Uptane::Role &name);
   std::vector<std::string> getDelegationTargets(const Uptane::Role &name);
+  void exportToLockBox(const boost::filesystem::path &lockbox_path);
 
   // note: it used to be "repo/image" which is way less confusing but we've just
   // given up and adopted what the backend does

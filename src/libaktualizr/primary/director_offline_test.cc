@@ -9,6 +9,7 @@
 #include "uptane/directorrepository.h"
 #include "uptane/exceptions.h"
 #include "uptane/fetcher.h"
+#include "uptane_repo.h"
 
 namespace fs = boost::filesystem;
 fs::path offline_update_path;  // NOLINT
@@ -71,6 +72,63 @@ TEST(DirectorOffline, Unprovisioned) {
   // NOLINTNEXTLINE
   EXPECT_THROW(dut.updateMetaOffUpd(storage, fetcher), Uptane::Exception)
       << "Shouldn't accept an update before provisioning";
+}
+
+// NOLINTNEXTLINE
+TEST(DirectorOffline, GeneratedMetadata) {
+  DirectorRepository dut;
+  const TemporaryDirectory dir;
+  const TemporaryDirectory repo_dir;
+
+  // Generate an Uptane repository with offline update metadata
+  UptaneRepo repo(repo_dir.Path(), "2024-12-31T23:59:59Z", "urn:tdx-ota:lockbox:test2:1:generated");
+  repo.generateRepo();
+
+  // Add a dummy image to the image repo
+  const std::string target_name = "6/qemuarm64/torizon/torizon-core-docker/test-generated";
+  const std::string hardware_id = "qemuarm64";
+  repo.addCustomImage(target_name,
+                      Hash(Hash::Type::kSha256, "a4a3a4a67aa274d7276b1824759debe64178530149daea25845017b28a54a397"), 0,
+                      hardware_id);
+
+  // Add offline update target
+  repo.addOfflineUpdateTarget(target_name, hardware_id, "test2", "2024-06-12T20:08:06Z");
+  repo.signOfflineTargets("test2");
+
+  // Export the LockBox (this generates the offline-snapshot and exports everything)
+  const TemporaryDirectory lockbox_dir;
+  repo.exportLockBox(lockbox_dir.Path(), {"test2"}, "2024-07-06T15:31:56Z");
+
+  // Set up storage and import the generated metadata
+  StorageConfig storage_config;
+  storage_config.path = dir.Path();
+
+  fs::path import = dir.Path() / "import";
+  fs::path director_import = import / "director";
+  fs::create_directories(director_import);
+
+  // Copy root metadata from generated repo
+  fs::copy_file(repo_dir.Path() / "repo/director/1.root.json", director_import / "root.json");
+
+  SQLStorage storage{storage_config, false};
+
+  ImportConfig import_config;
+  import_config.base_path = import;
+  storage.importData(import_config);
+
+  EcuSerials const ecu_serials{std::make_pair(EcuSerial("serial1"), HardwareIdentifier(hardware_id))};
+
+  storage.storeEcuSerials(ecu_serials);
+  storage.stashEcuSerialsForHwId(ecu_serials);
+
+  OfflineUpdateFetcher const fetcher(lockbox_dir.Path());
+  dut.ForceNowForTesting(TimeStamp("2024-01-01T20:01:00Z"));
+  dut.updateMetaOffUpd(storage, fetcher);
+
+  auto correlation_id = dut.getCorrelationId();
+  // For offline updates, the correlation ID is derived from the offline targets metadata hash
+  EXPECT_TRUE(correlation_id.find("urn:tdx-ota:lockbox:test2:1:") == 0);
+  EXPECT_GT(correlation_id.length(), std::string("urn:tdx-ota:lockbox:test2:1:").length());
 }
 
 #endif  // BUILD_OFFLINE_UPDATES
