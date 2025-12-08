@@ -121,6 +121,8 @@ struct UptaneTestCommon {
     Config conf("tests/config/basic.toml");
     conf.uptane.director_server = url + "/director";
     conf.uptane.repo_server = url + "/repo";
+    // The default lockfile is in a global location, which causes race conditions during testing.
+    conf.uptane.update_lock_file = "";
     conf.provision.server = url;
     conf.provision.primary_ecu_serial = "CA:FE:A6:D2:84:9D";
     conf.provision.primary_ecu_hardware_id = "primary_hw";

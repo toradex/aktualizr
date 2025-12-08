@@ -121,6 +121,7 @@ class Aktualizr:
     secondary_preinstall_wait_sec = {secondary_wait_sec}
     director_server = "{director}"
     repo_server = "{image_repo}"
+    update_lock_file = "{storage_dir}/aktualizr-lock"
 
     [bootloader]
     reboot_sentinel_dir = "{sentinel_dir}"
