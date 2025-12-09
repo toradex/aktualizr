@@ -263,7 +263,10 @@ if(FAULT_INJECTION)
     # run with a very small amount of tests on CI, should be more useful when
     # run for several hours
     add_test(NAME test_io_failure COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test_io_failure.py
-        --uptane-gen $<TARGET_FILE:uptane-generator> --akt-test $<TARGET_FILE:aktualizr-cycle-simple> -n 50 -j 10
+        --uptane-gen $<TARGET_FILE:uptane-generator>
+        --akt-test $<TARGET_FILE:aktualizr-cycle-simple>
+        -n 50 -j 10
+        -o ${CMAKE_CURRENT_BINARY_DIR}
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 endif(FAULT_INJECTION)
 

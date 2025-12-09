@@ -49,7 +49,7 @@ def uptane_repo(uptane_gen):
         yield repo_path
 
 
-def run_test(akt_test, server, srcdir, pf, k):
+def run_test(akt_test, output_dir, server, srcdir, pf, k):
     print(f'Running test {k}')
     with tempfile.TemporaryDirectory() as storage_dir:
         # run once with (maybe) a fault, trying to update
@@ -63,7 +63,7 @@ def run_test(akt_test, server, srcdir, pf, k):
         cp = run([akt_test, storage_dir, server],
                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=srcdir)
         if cp.returncode != 0:
-            error_state_dir = f'fail_state.{path.basename(storage_dir)}'
+            error_state_dir = path.join(output_dir, f'fail_state.{path.basename(storage_dir)}')
             print(f'Error detected, see {error_state_dir}')
             shutil.copytree(storage_dir, error_state_dir)
             with open(path.join(error_state_dir, 'output1.log'), 'wb') as f:
@@ -87,6 +87,7 @@ def main():
     parser.add_argument('--akt-test', help='path to aktualizr cycle test')
     parser.add_argument('--serve-only', action='store_true',
                         help='only serve metadata, do not run tests')
+    parser.add_argument("-o", help='output directory to write fail_state files', required=True)
     args = parser.parse_args()
 
     srcdir = path.abspath(args.akt_srcdir) if args.akt_srcdir is not None else os.getcwd()
@@ -103,7 +104,7 @@ def main():
                 time.sleep(1)
             return 0
 
-        fk = functools.partial(run_test, path.abspath(args.akt_test),
+        fk = functools.partial(run_test, path.abspath(args.akt_test), args.o,
                               server, srcdir, args.probability_failure)
         for r in pool.imap(fk, range(1, args.n_tests+1)):
             if not r:
