@@ -133,7 +133,8 @@ class SQLite3Guard {
   sqlite3* get() { return handle_.get(); }
   int get_rc() const { return rc_; }
 
-  explicit SQLite3Guard(const char* path, bool readonly, std::shared_ptr<std::mutex> mutex = nullptr)
+  explicit SQLite3Guard(const char* path, bool readonly, std::shared_ptr<std::mutex> mutex = nullptr,
+                        bool nofollow = false)
       : handle_(nullptr, sqlite3_close), rc_(0), m_(std::move(mutex)) {
     if (m_) {
       m_->lock();
@@ -142,11 +143,17 @@ class SQLite3Guard {
       throw SQLInternalException("sqlite3 has been compiled without multitheading support");
     }
     sqlite3* h;
+    int flags = 0;
     if (readonly) {
-      rc_ = sqlite3_open_v2(path, &h, SQLITE_OPEN_READONLY, nullptr);
+      flags = SQLITE_OPEN_READONLY;
     } else {
-      rc_ = sqlite3_open_v2(path, &h, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, nullptr);
+      flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX;
     }
+    if (nofollow) {
+      // NOLINTNEXTLINE(hicpp-signed-bitwise)
+      flags |= SQLITE_OPEN_NOFOLLOW;
+    }
+    rc_ = sqlite3_open_v2(path, &h, flags, nullptr);
 
     /* retry operations for 2 seconds before returning SQLITE_BUSY */
     sqlite3_busy_timeout(h, 2000);
@@ -155,8 +162,8 @@ class SQLite3Guard {
   }
 
   explicit SQLite3Guard(const boost::filesystem::path& path, bool readonly = false,
-                        std::shared_ptr<std::mutex> mutex = nullptr)
-      : SQLite3Guard(path.c_str(), readonly, std::move(mutex)) {}
+                        std::shared_ptr<std::mutex> mutex = nullptr, bool nofollow = false)
+      : SQLite3Guard(path.c_str(), readonly, std::move(mutex), nofollow) {}
   SQLite3Guard(SQLite3Guard&& guard) noexcept : handle_(std::move(guard.handle_)), rc_(guard.rc_) {}
   ~SQLite3Guard() {
     if (m_) {

@@ -8,6 +8,7 @@ add_custom_command(OUTPUT sql_schemas.cc sql_schemas_target
 
 set(HEADERS fsstorage_read.h
             invstorage.h
+            offline_logs_db.h
             sql_utils.h
             sqlstorage.h
             sqlstorage_base.h
@@ -17,6 +18,15 @@ set(SOURCES fsstorage_read.cc
             invstorage.cc
             sqlstorage.cc
             sqlstorage_base.cc)
+
+if (BUILD_OFFLINE_UPDATES)
+    list(APPEND SOURCES offline_logs_db.cc)
+    add_aktualizr_test(NAME offline_logs_db SOURCES offline_logs_db_test.cc PROJECT_WORKING_DIRECTORY)
+
+else (BUILD_OFFLINE_UPDATES)
+    aktualizr_source_file_checks(offline_logs_db.cc offline_logs_db_test.cc)
+endif(BUILD_OFFLINE_UPDATES)
+
 
 target_sources(config PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/storage_config.cc)
 
