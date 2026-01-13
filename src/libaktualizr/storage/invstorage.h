@@ -156,6 +156,11 @@ class INvStorage {
   virtual void storeInstallUpdatesAutomatically(InstallUpdatesAutomatically install_automatically) = 0;
   virtual bool loadInstallUpdatesAutomatically(InstallUpdatesAutomatically* install_automatically) const = 0;
 
+  // Offline update path persistence
+  virtual void storeOfflineUpdatePath(const boost::filesystem::path& path) = 0;
+  virtual boost::optional<boost::filesystem::path> loadOfflineUpdatePath() const = 0;
+  virtual void clearOfflineUpdatePath() = 0;
+
   // Special constructors and utilities
   static std::shared_ptr<INvStorage> newStorage(const StorageConfig& config, bool readonly = false);
   static void FSSToSQLS(FSStorageRead& fs_storage, SQLStorage& sql_storage);

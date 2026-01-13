@@ -1784,3 +1784,49 @@ bool SQLStorage::loadInstallUpdatesAutomatically(InstallUpdatesAutomatically* in
   *install_automatically = static_cast<InstallUpdatesAutomatically>(res);
   return true;
 }
+
+void SQLStorage::storeOfflineUpdatePath(const boost::filesystem::path& path) {
+  SQLite3Guard db = dbConnection();
+
+  auto statement = db.prepareStatement<std::string>(
+      "UPDATE device_info SET offline_update_path = ? WHERE unique_mark = 0;", path.string());
+
+  if (statement.step() != SQLITE_DONE) {
+    LOG_ERROR << "Failed to store offline update path: " << db.errmsg();
+    throw SQLException(std::string("Failed to store offline update path: ") + db.errmsg());
+  }
+}
+
+boost::optional<boost::filesystem::path> SQLStorage::loadOfflineUpdatePath() const {
+  SQLite3Guard db = dbConnection();
+
+  auto statement = db.prepareStatement("SELECT offline_update_path FROM device_info WHERE unique_mark = 0;");
+
+  int result = statement.step();
+  if (result == SQLITE_DONE) {
+    return boost::none;
+  }
+
+  if (result != SQLITE_ROW) {
+    LOG_ERROR << "Failed to read offline update path: " << db.errmsg();
+    throw SQLException(std::string("Failed to read offline update path: ") + db.errmsg());
+  }
+
+  auto path_str = statement.get_result_col_str(0);
+  if (path_str == boost::none || path_str->empty()) {
+    return boost::none;
+  }
+
+  return boost::filesystem::path(*path_str);
+}
+
+void SQLStorage::clearOfflineUpdatePath() {
+  SQLite3Guard db = dbConnection();
+
+  auto statement = db.prepareStatement("UPDATE device_info SET offline_update_path = NULL WHERE unique_mark = 0;");
+
+  if (statement.step() != SQLITE_DONE) {
+    LOG_ERROR << "Failed to clear offline update path: " << db.errmsg();
+    throw SQLException(std::string("Failed to clear offline update path: ") + db.errmsg());
+  }
+}

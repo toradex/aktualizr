@@ -116,6 +116,10 @@ class SQLStorage : public SQLStorageBase, public INvStorage {
   void storeInstallUpdatesAutomatically(InstallUpdatesAutomatically install_automatically) override;
   bool loadInstallUpdatesAutomatically(InstallUpdatesAutomatically* install_automatically) const override;
 
+  void storeOfflineUpdatePath(const boost::filesystem::path& path) override;
+  boost::optional<boost::filesystem::path> loadOfflineUpdatePath() const override;
+  void clearOfflineUpdatePath() override;
+
   StorageType type() override { return StorageType::kSqlite; };
 
  private:

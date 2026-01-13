@@ -563,6 +563,61 @@ TEST(sqlstorage, Consent) {
   EXPECT_EQ(res, InstallUpdatesAutomatically::kProceed) << "It can be changed";
 }
 
+TEST(sqlstorage, OfflineUpdatePath) {
+  TemporaryDirectory temp_dir;
+  StorageConfig config;
+  config.path = temp_dir.Path();
+  auto storage = INvStorage::newStorage(config);
+
+  // Need to initialize device_info first
+  storage->storeDeviceId("test-device-id");
+
+  // Path not set initially
+  auto path = storage->loadOfflineUpdatePath();
+  EXPECT_FALSE(path) << "Should have no path by default";
+
+  // Store and load a path
+  boost::filesystem::path test_path("/media/usb/updates");
+  storage->storeOfflineUpdatePath(test_path);
+  path = storage->loadOfflineUpdatePath();
+  EXPECT_TRUE(path) << "Once stored, it can be read";
+  EXPECT_EQ(*path, test_path) << "It should round-trip";
+
+  // Clear the path
+  storage->clearOfflineUpdatePath();
+  path = storage->loadOfflineUpdatePath();
+  EXPECT_FALSE(path) << "After clearing, path should be empty";
+
+  // Can store a new path after clearing
+  boost::filesystem::path new_path("/mnt/external/updates");
+  storage->storeOfflineUpdatePath(new_path);
+  path = storage->loadOfflineUpdatePath();
+  EXPECT_TRUE(path) << "Can store a path after clearing";
+  EXPECT_EQ(*path, new_path) << "New path should round-trip";
+}
+
+TEST(sqlstorage, OfflineUpdatePathSurvivesReopen) {
+  TemporaryDirectory temp_dir;
+  StorageConfig config;
+  config.path = temp_dir.Path();
+
+  boost::filesystem::path test_path("/media/usb/updates");
+
+  {
+    auto storage = INvStorage::newStorage(config);
+    storage->storeDeviceId("test-device-id");
+    storage->storeOfflineUpdatePath(test_path);
+  }
+
+  // Reopen storage
+  {
+    auto storage = INvStorage::newStorage(config);
+    auto path = storage->loadOfflineUpdatePath();
+    EXPECT_TRUE(path) << "Path should survive database close/reopen";
+    EXPECT_EQ(*path, test_path) << "Path value should be preserved";
+  }
+}
+
 #ifndef __NO_MAIN__
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
