@@ -17,6 +17,12 @@
 
 struct LoggerConfig {
   int loglevel{2};
+  // Offline logs configuration
+  bool offline_logs_enabled{true};
+  std::string offline_logs_file{"update-logs.db"};
+  std::vector<std::string> offline_capture_services{"aktualizr", "aktualizr-torizon", "docker-compose",
+                                                    "greenboot-status"};
+
   void updateFromPropertyTree(const boost::property_tree::ptree& pt);
   void writeToStream(std::ostream& out_stream) const;
 };

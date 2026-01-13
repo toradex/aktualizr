@@ -23,6 +23,65 @@ TEST(config, DefaultValues) {
   EXPECT_EQ(conf.uptane.polling_sec, 10U);
 }
 
+/* Test default values for offline logs configuration */
+TEST(config, OfflineLogsDefaults) {
+  Config conf;
+  EXPECT_TRUE(conf.logger.offline_logs_enabled);
+  EXPECT_EQ(conf.logger.offline_logs_file, "update-logs.db");
+  ASSERT_EQ(conf.logger.offline_capture_services.size(), 4);
+  EXPECT_EQ(conf.logger.offline_capture_services[0], "aktualizr");
+  EXPECT_EQ(conf.logger.offline_capture_services[1], "aktualizr-torizon");
+  EXPECT_EQ(conf.logger.offline_capture_services[2], "docker-compose");
+  EXPECT_EQ(conf.logger.offline_capture_services[3], "greenboot-status");
+}
+
+/* Test parsing offline_logs_enabled from config */
+TEST(config, OfflineLogsEnabled) {
+  Config conf;
+  conf.updateFromTomlString("[logger]\noffline_logs_enabled = false\n");
+  EXPECT_FALSE(conf.logger.offline_logs_enabled);
+
+  conf.updateFromTomlString("[logger]\noffline_logs_enabled = true\n");
+  EXPECT_TRUE(conf.logger.offline_logs_enabled);
+}
+
+/* Test parsing offline_logs_file from config */
+TEST(config, OfflineLogsFile) {
+  Config conf;
+  conf.updateFromTomlString("[logger]\noffline_logs_file = \"custom-logs.db\"\n");
+  EXPECT_EQ(conf.logger.offline_logs_file, "custom-logs.db");
+
+  // Test absolute path
+  conf.updateFromTomlString("[logger]\noffline_logs_file = \"/var/log/offline.db\"\n");
+  EXPECT_EQ(conf.logger.offline_logs_file, "/var/log/offline.db");
+}
+
+/* Test parsing offline_capture_services from config */
+TEST(config, OfflineCaptureServices) {
+  Config conf;
+  conf.updateFromTomlString("[logger]\noffline_capture_services = \"myservice1 myservice2\"\n");
+  ASSERT_EQ(conf.logger.offline_capture_services.size(), 2);
+  EXPECT_EQ(conf.logger.offline_capture_services[0], "myservice1");
+  EXPECT_EQ(conf.logger.offline_capture_services[1], "myservice2");
+}
+
+/* Test empty offline_capture_services results in empty vector */
+TEST(config, OfflineCaptureServicesEmpty) {
+  Config conf;
+  conf.updateFromTomlString("[logger]\noffline_capture_services = \"\"\n");
+  EXPECT_TRUE(conf.logger.offline_capture_services.empty());
+}
+
+/* Test offline_capture_services handles multiple spaces */
+TEST(config, OfflineCaptureServicesMultipleSpaces) {
+  Config conf;
+  conf.updateFromTomlString("[logger]\noffline_capture_services = \"svc1   svc2  svc3\"\n");
+  ASSERT_EQ(conf.logger.offline_capture_services.size(), 3);
+  EXPECT_EQ(conf.logger.offline_capture_services[0], "svc1");
+  EXPECT_EQ(conf.logger.offline_capture_services[1], "svc2");
+  EXPECT_EQ(conf.logger.offline_capture_services[2], "svc3");
+}
+
 TEST(config, TomlBasic) {
   Config conf("tests/config/basic.toml");
   EXPECT_EQ(conf.pacman.type, PACKAGE_MANAGER_NONE);
@@ -224,6 +283,7 @@ TEST(config, TwoDirs) {
   EXPECT_EQ(config.provision.provision_path.string(), "y_prov_path");
 }
 
+namespace {
 void checkConfigExpectations(const Config &conf) {
   EXPECT_EQ(conf.storage.type, StorageType::kSqlite);
   EXPECT_EQ(conf.pacman.type, PACKAGE_MANAGER_NONE);
@@ -234,6 +294,7 @@ void checkConfigExpectations(const Config &conf) {
   EXPECT_EQ(conf.uptane.key_type, KeyType::kED25519);
   EXPECT_EQ(conf.bootloader.rollback_mode, RollbackMode::kUbootMasked);
 }
+}  // namespace
 
 /* This test is designed to catch a bug in which storage.type and pacman.type
  * set in the first config file read could be overwritten by the defaults when
