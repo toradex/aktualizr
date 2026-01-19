@@ -182,4 +182,7 @@ add_aktualizr_test(NAME sotauptaneclient_offline
                    PROJECT_WORKING_DIRECTORY
                    LIBRARIES uptane_generator_lib virtual_secondary)
 
+add_aktualizr_test(NAME offline_logs_manager
+                   SOURCES offline_logs_manager_test.cc)
+
 aktualizr_source_file_checks(${SOURCES} ${HEADERS} ${TEST_SOURCES})

@@ -25,7 +25,20 @@ fs::path OfflineLogsManager::ResolveLogsDbPath(const fs::path& offline_update_pa
   if (logs_path.is_absolute()) {
     return logs_path;
   }
-  return offline_update_path / logs_filename_;
+
+  // Canonicalize the offline_update_path to resolve any symlinks in the path hierarchy.
+  // This allows system-level symlinks (e.g., /mnt -> /var/mnt/automount) while still
+  // protecting against symlink attacks on the removable media itself
+  // (via SQLITE_OPEN_NOFOLLOW on the final db file in OfflineLogsDb).
+  // The offline_update_path is trusted input, as is the logs_filename_ from configuration.
+  boost::system::error_code ec;
+  fs::path canonical_update_path = fs::canonical(offline_update_path, ec);
+  if (ec) {
+    LOG_WARNING << "Failed to canonicalize offline update path: " << ec.message();
+    // Fall back to original path if canonicalization fails
+    return offline_update_path / logs_filename_;
+  }
+  return canonical_update_path / logs_filename_;
 }
 
 InstallId OfflineLogsManager::BeginInstall(const fs::path& offline_update_path, std::string_view device_id,
