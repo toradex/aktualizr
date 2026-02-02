@@ -166,7 +166,7 @@ if(BUILD_SOTA_TOOLS)
     find_package(OSTree REQUIRED)
 endif(BUILD_SOTA_TOOLS)
 
-if(BUILD_DBUS)
+if(BUILD_DBUS OR BUILD_OFFLINE_UPDATES)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(SYSTEMD REQUIRED libsystemd>=233)
 endif(BUILD_DBUS)

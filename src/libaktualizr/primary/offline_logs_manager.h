@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "libaktualizr/config.h"
+#include "storage/journal_copier.h"
 #include "storage/offline_logs_db.h"
 
 class INvStorage;
@@ -61,7 +62,8 @@ class OfflineLogsManager {
 
   /**
    * Capture logs from journal since last capture.
-   * Currently a stub that logs a message (Phase 2 will implement JournalCopier).
+   * Copies journal entries from configured services to the offline logs database.
+   * Updates the internal cursor position after each capture.
    */
   void CaptureLogs();
 
@@ -104,7 +106,7 @@ class OfflineLogsManager {
   std::string logs_filename_;
   std::vector<std::string> capture_services_;
   std::unique_ptr<OfflineLogsDb> db_;
-  // TODO: JournalCopier::Cursor journal_cursor_;  // Phase 2
+  JournalCopier::Cursor journal_cursor_;
   InstallId current_install_id_;
 };
 

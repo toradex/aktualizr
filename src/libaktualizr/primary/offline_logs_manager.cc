@@ -68,8 +68,11 @@ InstallId OfflineLogsManager::BeginInstall(const fs::path& offline_update_path, 
   LOG_INFO << "OfflineLogsManager::BeginInstall: created install " << current_install_id_.Value() << " for device "
            << device_id << ", update '" << update_name << "' v" << update_version;
 
-  // TODO: Phase 2 - capture initial journal cursor here
-  // journal_cursor_ = JournalCopier::GetCurrentCursor();
+  // Capture initial journal cursor so we can copy logs from this point forward
+  journal_cursor_ = JournalCopier::GetCurrentCursor();
+  if (!journal_cursor_.IsValid()) {
+    LOG_WARNING << "OfflineLogsManager::BeginInstall: failed to get journal cursor (journal logging disabled)";
+  }
 
   return current_install_id_;
 }
@@ -105,6 +108,13 @@ InstallId OfflineLogsManager::FindAndResumeInstall(const fs::path& offline_updat
   LOG_INFO << "OfflineLogsManager::FindAndResumeInstall: resumed install " << current_install_id_.Value()
            << " for device " << device_id;
 
+  // Capture a new journal cursor for post-reboot logging
+  // Note: We capture from now, not from the pre-reboot cursor, as we don't persist cursors across reboots
+  journal_cursor_ = JournalCopier::GetCurrentCursor();
+  if (!journal_cursor_.IsValid()) {
+    LOG_WARNING << "OfflineLogsManager::FindAndResumeInstall: failed to get journal cursor (journal logging disabled)";
+  }
+
   return current_install_id_;
 }
 
@@ -113,9 +123,17 @@ void OfflineLogsManager::CaptureLogs() {
     return;
   }
 
-  // TODO: Phase 2 - implement JournalCopier integration
-  LOG_INFO << "OfflineLogsManager::CaptureLogs: would capture journal logs for install " << current_install_id_.Value()
-           << " (stub - Phase 2 not implemented)";
+  if (!journal_cursor_.IsValid()) {
+    LOG_DEBUG << "OfflineLogsManager::CaptureLogs: no valid cursor, skipping journal capture";
+    return;
+  }
+
+  size_t entries_copied = JournalCopier::CopyFromCursor(journal_cursor_, capture_services_, *db_, current_install_id_);
+  LOG_INFO << "OfflineLogsManager::CaptureLogs: captured " << entries_copied << " journal entries for install "
+           << current_install_id_.Value();
+
+  // Update cursor to current position for next capture
+  journal_cursor_ = JournalCopier::GetCurrentCursor();
 }
 
 void OfflineLogsManager::CaptureReports(INvStorage& storage) {
