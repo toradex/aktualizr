@@ -1437,18 +1437,11 @@ result::PutManifestResult SotaUptaneClient::putManifestSimple(const Json::Value 
   }
 
   auto signed_manifest = uptane_manifest->sign(manifest);
-  HttpResponse response = http->put(config.uptane.director_server + "/manifest", signed_manifest);
-  if (!response.isOk()) {
-    connected_ = false;
-    LOG_WARNING << "Put manifest request failed: " << response.getStatusStr();
-    return {manifest, PutManifestStatus::kNoNetwork};
-  }
-  if (!connected_) {
-    LOG_INFO << "Connectivity is restored.";
-  }
-  connected_ = true;
 
-  // Complete offline logging if there was an active install
+  // Complete offline logging if there was an active install.
+  // This must happen before we try to send the manifest to the server, because
+  // if the device is offline, the manifest should still be written to the
+  // offline logs database so it can be retrieved via the USB media.
   if (offline_logs_manager_.HasActiveInstall()) {
     // Get the report counter from the ECU report counter
     std::vector<std::pair<Uptane::EcuSerial, int64_t>> ecu_cnt;
@@ -1461,6 +1454,17 @@ result::PutManifestResult SotaUptaneClient::putManifestSimple(const Json::Value 
     storage->clearOfflineUpdatePath();
     LOG_INFO << "Offline logging completed and update path cleared";
   }
+
+  HttpResponse response = http->put(config.uptane.director_server + "/manifest", signed_manifest);
+  if (!response.isOk()) {
+    connected_ = false;
+    LOG_WARNING << "Put manifest request failed: " << response.getStatusStr();
+    return {manifest, PutManifestStatus::kNoNetwork};
+  }
+  if (!connected_) {
+    LOG_INFO << "Connectivity is restored.";
+  }
+  connected_ = true;
 
   storage->clearInstallationResults();
   return {manifest, PutManifestStatus::kSuccess};

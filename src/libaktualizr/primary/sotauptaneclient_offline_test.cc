@@ -10,10 +10,13 @@
 #include <libaktualizr/packagemanagerinterface.h>
 #include <libaktualizr/types.h>
 #include <logging/logging.h>
+#include <sqlite3.h>
 #include <utilities/utils.h>
+#include <sstream>
 
 #include "httpfake.h"
 #include "primary/sotauptaneclient.h"
+#include "storage/offline_logs_db.h"
 #include "uptane_repo.h"
 #include "uptane_test_common.h"
 
@@ -32,10 +35,10 @@ namespace fs = boost::filesystem;
  */
 class SotaUptaneClientOfflineUpdate : public testing::Test {
  public:
-  SotaUptaneClientOfflineUpdate(SotaUptaneClientOfflineUpdate&&) = delete;
-  SotaUptaneClientOfflineUpdate(const SotaUptaneClientOfflineUpdate&) = delete;
-  SotaUptaneClientOfflineUpdate& operator=(const SotaUptaneClientOfflineUpdate&) = delete;
-  SotaUptaneClientOfflineUpdate& operator=(SotaUptaneClientOfflineUpdate&&) = delete;
+  SotaUptaneClientOfflineUpdate(SotaUptaneClientOfflineUpdate &&) = delete;
+  SotaUptaneClientOfflineUpdate(const SotaUptaneClientOfflineUpdate &) = delete;
+  SotaUptaneClientOfflineUpdate &operator=(const SotaUptaneClientOfflineUpdate &) = delete;
+  SotaUptaneClientOfflineUpdate &operator=(SotaUptaneClientOfflineUpdate &&) = delete;
   ~SotaUptaneClientOfflineUpdate() override = default;
 
  protected:
@@ -275,9 +278,105 @@ TEST_F(SotaUptaneClientOfflineUpdate, OfflineUpdatePathPersistence) {  // NOLINT
   }
 }
 
+/**
+ * HttpFake subclass that simulates network failure on PUT /manifest
+ */
+class HttpFakeOffline : public HttpFake {
+ public:
+  using HttpFake::HttpFake;
+
+  HttpResponse put(const std::string &url, const Json::Value &data) override {
+    if (url.find("/manifest") != std::string::npos) {
+      // Simulate network failure
+      last_manifest = data;
+      return HttpResponse("", 0, CURLE_COULDNT_CONNECT, "Connection failed");
+    }
+    return HttpFake::put(url, data);
+  }
+};
+
+/**
+ * Test that manifest is written to offline logs database even when device is offline.
+ *
+ * This validates the fix for a bug where the manifest was never written to the
+ * 'installs' table when the device was offline (i.e., when putManifest failed
+ * to send to the server).
+ */
+TEST_F(SotaUptaneClientOfflineUpdate, ManifestWrittenToOfflineLogsWhenDeviceOffline) {  // NOLINT
+  // Use HttpFakeOffline which simulates network failure on PUT /manifest
+  auto http = std::make_shared<HttpFakeOffline>(temp_dir_.Path(), "", uptane_metadata_dir_ / "repo");
+  auto conf = UptaneTestCommon::makeTestConfig(temp_dir_, http->tls_server);
+  conf.import.base_path = aktualizr_dir_ / "import";
+  conf.logger.offline_logs_enabled = true;
+  conf.logger.offline_logs_file = "update-logs.db";
+
+  auto storage = INvStorage::newStorage(conf.storage);
+  storage->importData(conf.import);
+
+  UptaneTestCommon::TestUptaneClient dut(conf, storage, http);
+  dut.initialize();
+
+  // Step 1: Fetch metadata from lockbox
+  auto update_result = dut.fetchMetaOffUpd(lockbox_dir_);
+  ASSERT_EQ(update_result.status, result::UpdateStatus::kUpdatesAvailable);
+  ASSERT_FALSE(update_result.updates.empty());
+
+  // Step 2: Download images (this starts offline logging)
+  auto download_result = dut.downloadImages(update_result.updates, UpdateType::kOffline);
+
+  // Verify the logs database was created
+  fs::path logs_db_path = lockbox_dir_ / "update-logs.db";
+  ASSERT_TRUE(fs::exists(logs_db_path)) << "Offline logs database should exist after downloadImages";
+
+  // Step 3: Install the update (this will call putManifestSimple which will fail due to HttpFakeOffline)
+  auto install_result = dut.uptaneInstall(update_result.updates, UpdateType::kOffline);
+
+  // Step 4: Try to send manifest (this will fail due to network simulation)
+  auto manifest_result = dut.putManifest();
+  EXPECT_EQ(manifest_result.status, result::PutManifestStatus::kNoNetwork)
+      << "Manifest send should fail due to simulated network failure";
+
+  // Step 5: Verify the manifest was still written to the offline logs database
+  // Open the database and check for a completed install with manifest
+  OfflineLogsDb db(logs_db_path);
+  ASSERT_TRUE(db.Ok()) << "Should be able to open the offline logs database";
+
+  // Query for completed installs (those with non-null manifest)
+  // We need to use SQLite directly since OfflineLogsDb doesn't expose a query method
+  sqlite3 *sqlite_db = nullptr;
+  int rc = sqlite3_open(logs_db_path.c_str(), &sqlite_db);
+  ASSERT_EQ(rc, SQLITE_OK) << "Should be able to open database with sqlite3";
+
+  sqlite3_stmt *stmt = nullptr;
+  const char *query = "SELECT manifest FROM installs WHERE manifest IS NOT NULL ORDER BY id DESC LIMIT 1";
+  rc = sqlite3_prepare_v2(sqlite_db, query, -1, &stmt, nullptr);
+  ASSERT_EQ(rc, SQLITE_OK) << "Should be able to prepare query";
+
+  rc = sqlite3_step(stmt);
+  EXPECT_EQ(rc, SQLITE_ROW) << "Should find a completed install with manifest in offline logs database";
+
+  if (rc == SQLITE_ROW) {
+    const char *manifest_text = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0));
+    EXPECT_NE(manifest_text, nullptr) << "Manifest should not be null";
+    if (manifest_text != nullptr) {
+      std::string manifest_str(manifest_text);
+      EXPECT_FALSE(manifest_str.empty()) << "Manifest should not be empty";
+      // Verify it's valid JSON
+      Json::Value manifest_json;
+      Json::CharReaderBuilder builder;
+      std::string errs;
+      std::istringstream stream(manifest_str);
+      EXPECT_TRUE(Json::parseFromStream(builder, stream, &manifest_json, &errs)) << "Manifest should be valid JSON";
+    }
+  }
+
+  sqlite3_finalize(stmt);
+  sqlite3_close(sqlite_db);
+}
+
 #endif  // BUILD_OFFLINE_UPDATES
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
 
   // Verify we're running from the aktualizr source root directory
