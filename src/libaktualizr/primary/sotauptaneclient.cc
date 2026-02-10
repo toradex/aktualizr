@@ -57,7 +57,7 @@ SotaUptaneClient::SotaUptaneClient(Config &config_in, std::shared_ptr<INvStorage
       provisioner_(config.provision, storage, http, key_manager_, secondaries),
       flow_control_(flow_control) {
   report_queue = std_::make_unique<ReportQueue>(config, http, storage);
-  secondary_provider_ = SecondaryProviderBuilder::Build(config, storage, package_manager_);
+  secondary_provider_ = SecondaryProviderBuilder::Build(config, storage, package_manager_, http);
 }
 
 void SotaUptaneClient::addSecondary(const std::shared_ptr<SecondaryInterface> &sec) {
@@ -824,6 +824,23 @@ void SotaUptaneClient::reportConsentOutcome(const Consent::Outcome &consent_outc
       std::make_unique<ConsentOutcomeReport>(correlation_id, consent_outcome.granted, consent_outcome.reason));
 }
 
+bool SotaUptaneClient::needTargetFileOnPrimary(const Uptane::Target &target) {
+  const Uptane::EcuSerial primary_ecu_serial = primaryEcuSerial();
+  if (target.IsForEcu(primary_ecu_serial)) {
+    return true;
+  }
+  for (const auto &ecu : target.ecus()) {
+    if (ecu.first == primary_ecu_serial) {
+      continue;
+    }
+    auto it = secondaries.find(ecu.first);
+    if (it != secondaries.end() && it->second->needsImageFileOnPrimary()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::pair<bool, Uptane::Target> SotaUptaneClient::downloadImage(const Uptane::Target &target, UpdateType utype) {
   auto correlation_id = director_repo.getCorrelationId();
   // Send an event for all ECUs that are touched by this target. Don't report
@@ -846,9 +863,7 @@ std::pair<bool, Uptane::Target> SotaUptaneClient::downloadImage(const Uptane::Ta
       report_progress_cb(events_channel.get(), t, description, progress);
     };
 
-    const Uptane::EcuSerial &primary_ecu_serial = primaryEcuSerial();
-
-    if (target.IsForEcu(primary_ecu_serial) || !target.IsOstree()) {
+    if (needTargetFileOnPrimary(target)) {
       const int max_tries = 3;
       int tries = 0;
       std::chrono::milliseconds wait(500);
@@ -880,7 +895,7 @@ std::pair<bool, Uptane::Target> SotaUptaneClient::downloadImage(const Uptane::Ta
         throw Uptane::TargetHashMismatch(target.filename());
       }
     } else {
-      // we emulate successful download in case of the Secondary OSTree update
+      // No need to store image on primary (e.g. OSTree secondary or handler-download generic secondary).
       success = true;
     }
   } catch (const std::exception &e) {
@@ -1138,15 +1153,9 @@ result::Install SotaUptaneClient::uptaneInstall(const std::vector<Uptane::Target
       return std::make_tuple(result, "Stored Uptane metadata is invalid");
     }
 
-    Uptane::EcuSerial primary_ecu_serial = primaryEcuSerial();
-    // Recheck the downloaded update hashes.
+    // Recheck the downloaded update hashes (only for targets we actually stored).
     for (const auto &update : updates) {
-      if (update.IsForEcu(primary_ecu_serial) || !update.IsOstree()) {
-        // download binary images for any target, for both Primary and Secondary
-        // download an OSTree revision just for Primary, Secondary will do it by itself
-        // Primary cannot verify downloaded OSTree targets for Secondaries,
-        // Downloading of Secondary's OSTree repo revision to the Primary's can fail
-        // if they differ signficantly as OSTree has a certain cap/limit of the diff it pulls
+      if (needTargetFileOnPrimary(update)) {
         if (package_manager_->verifyTarget(update) != TargetStatus::kGood) {
           result.dev_report = {false, data::ResultCode::Numeric::kInternalError, ""};
           return std::make_tuple(result, "Downloaded target is invalid");
@@ -1168,6 +1177,7 @@ result::Install SotaUptaneClient::uptaneInstall(const std::vector<Uptane::Target
     // target images should already have been downloaded to metadata_path/targets/
 
     // Collect the installations that are needed
+    Uptane::EcuSerial primary_ecu_serial = primaryEcuSerial();
     std::vector<Uptane::Target> primary_installs;
     std::vector<SecondaryEcuInstallationJob> secondary_installs;
 

@@ -60,6 +60,7 @@ class TorizonGenericSecondaryTest : public ::testing::Test {
     config_.pacman.type = PACKAGE_MANAGER_NONE;
     config_.pacman.images_path = temp_dir_->Path() / "images";
     config_.storage.path = temp_dir_->Path();
+    config_.uptane.repo_server = "https://repo.example.com";
 
     storage_ = INvStorage::newStorage(config_.storage);
     storage_->storeTlsCreds(ca_, cert_, pkey_);
@@ -79,6 +80,14 @@ class TorizonGenericSecondaryTest : public ::testing::Test {
   void makeSecondary(boost::filesystem::path handler_rel_path) {
     auto handler_path = boost::filesystem::current_path() / handler_rel_path;
     sconfig_ = makeTestConfig(*temp_dir_, handler_path);
+    secondary_ = std::make_shared<Primary::TorizonGenericSecondary>(*sconfig_);
+    secondary_->init(secondary_provider_);
+  }
+
+  void makeSecondaryWithHandlerDownload(boost::filesystem::path handler_rel_path) {
+    auto handler_path = boost::filesystem::current_path() / handler_rel_path;
+    sconfig_ = makeTestConfig(*temp_dir_, handler_path);
+    sconfig_->handler_downloads_firmware = true;
     secondary_ = std::make_shared<Primary::TorizonGenericSecondary>(*sconfig_);
     secondary_->init(secondary_provider_);
   }
@@ -120,6 +129,31 @@ TEST_F(TorizonGenericSecondaryTest, NonExistingHandler) {
   LOG_DEBUG << "Running a non-existing action handler";
   handler_result = secondary_->callActionHandler("dummy-action", vars);
   EXPECT_EQ(handler_result, TorizonGenericSecondary::ActionHandlerResult::NotAvailable);
+}
+
+TEST_F(TorizonGenericSecondaryTest, NeedsImageFileOnPrimaryDefault) {
+  makeSecondary("tests/torizon/non_existing_action.sh");
+  EXPECT_TRUE(secondary_->needsImageFileOnPrimary());
+}
+
+TEST_F(TorizonGenericSecondaryTest, NeedsImageFileOnPrimaryHandlerDownloads) {
+  makeSecondaryWithHandlerDownload("tests/torizon/non_existing_action.sh");
+  EXPECT_FALSE(secondary_->needsImageFileOnPrimary());
+}
+
+TEST_F(TorizonGenericSecondaryTest, InstallDownloadFirmwareSuccess) {
+  logger_set_threshold(boost::log::trivial::trace);
+  makeSecondaryWithHandlerDownload("tests/torizon/test_download_firmware.sh");
+
+  Json::Value target_json;
+  target_json["hashes"]["sha256"] = "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb";
+  target_json["length"] = 1;
+  Uptane::Target target("fake_file", target_json);
+
+  InstallInfo info(UpdateType::kOnline);
+
+  EXPECT_EQ(secondary_->install(target, info, nullptr).result_code, data::ResultCode::Numeric::kOk);
+  EXPECT_EQ(Utils::readFile(sconfig_->target_name_path.string()), "fake_file");
 }
 
 TEST_F(TorizonGenericSecondaryTest, HandlerFinishedBySignal) {

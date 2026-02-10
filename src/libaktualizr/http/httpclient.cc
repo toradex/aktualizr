@@ -176,6 +176,41 @@ HttpResponse HttpClient::get(const std::string& url, int64_t maxsize, const api:
   return response;
 }
 
+std::string HttpClient::getEffectiveUrl(const std::string& url) {
+  CURL* curl_resolve = Utils::curlDupHandleWrapper(curl, pkcs11_key);
+  if (curl_resolve == nullptr) {
+    return "";
+  }
+  curlEasySetoptWrapper(curl_resolve, CURLOPT_POSTFIELDS, "");
+  curlEasySetoptWrapper(curl_resolve, CURLOPT_URL, url.c_str());
+  curlEasySetoptWrapper(curl_resolve, CURLOPT_HTTPGET, 1L);
+  // Use a range request to minimise body transfer while still following
+  // redirects. Unlike CURLOPT_NOBODY (HEAD), range GETs follow 3xx chains.
+  // If the server ignores Range and sends the full body, cap transfer size so
+  // we don't pull a full image. We perform directly (not via perform()) so
+  // CURLE_FILESIZE_EXCEEDED is only logged at DEBUG and we still return the
+  // effective URL.
+  curlEasySetoptWrapper(curl_resolve, CURLOPT_RANGE, "0-0");
+  curlEasySetoptWrapper(curl_resolve, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(1));
+
+  // Perform directly: we don't need perform()'s retry/error-logging since we
+  // only care about CURLINFO_EFFECTIVE_URL, not the response body or status.
+  WriteStringArg discard;
+  curlEasySetoptWrapper(curl_resolve, CURLOPT_WRITEDATA, static_cast<void*>(&discard));
+  CURLcode res = curl_easy_perform(curl_resolve);
+
+  char* effective_url = nullptr;
+  curl_easy_getinfo(curl_resolve, CURLINFO_EFFECTIVE_URL, &effective_url);
+
+  if (res != CURLE_OK) {
+    LOG_DEBUG << "getEffectiveUrl: curl error " << res << " (" << curl_easy_strerror(res) << ") for " << url;
+  }
+
+  std::string result = (effective_url != nullptr) ? effective_url : "";
+  curl_easy_cleanup(curl_resolve);
+  return result;
+}
+
 HttpResponse HttpClient::post(const std::string& url, const std::string& content_type, const std::string& data) {
   CURL* curl_post = Utils::curlDupHandleWrapper(curl, pkcs11_key);
   curl_slist* req_headers = curl_slist_dup(headers);

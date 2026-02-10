@@ -2,6 +2,7 @@
 
 #include <fstream>
 
+#include "http/httpinterface.h"
 #include "logging/logging.h"
 #include "storage/invstorage.h"
 #include "uptane/tuf.h"
@@ -117,4 +118,19 @@ std::string SecondaryProvider::getTreehubCredentials() const {
 
 std::ifstream SecondaryProvider::getTargetFileHandle(const Uptane::Target& target) const {
   return package_manager_->openTargetFile(target);
+}
+
+std::string SecondaryProvider::getTargetUri(const Uptane::Target& target) const {
+  if (!target.uri().empty()) {
+    return target.uri();
+  }
+  const std::string default_url =
+      config_.uptane.repo_server + "/targets/" + Utils::urlEncode(target.filename());
+  if (http_ != nullptr) {
+    const std::string resolved = http_->getEffectiveUrl(default_url);
+    if (!resolved.empty()) {
+      return resolved;
+    }
+  }
+  return default_url;
 }

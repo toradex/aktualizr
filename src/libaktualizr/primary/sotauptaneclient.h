@@ -203,6 +203,7 @@ class SotaUptaneClient {
   void checkAndUpdatePendingSecondaries();
   Uptane::EcuSerial primaryEcuSerial() { return provisioner_.PrimaryEcuSerial(); }
   boost::optional<Uptane::HardwareIdentifier> getEcuHwId(const Uptane::EcuSerial &serial);
+  bool needTargetFileOnPrimary(const Uptane::Target &target);
 
   template <class T, class... Args>
   void sendEvent(Args &&...args) {

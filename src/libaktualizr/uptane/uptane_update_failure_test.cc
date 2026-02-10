@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <iostream>
 #include <memory>
 
@@ -74,6 +75,8 @@ class FailingSecondary : public SecondaryInterface {
     return signed_ecu_version;
   }
   bool ping() const override { return true; }
+
+  bool needsImageFileOnPrimary() const override { return needs_image_file_on_primary_; }
 
   data::InstallationResult putMetadata(const Uptane::Target & /*target*/) override {
     return {data::ResultCode::Numeric::kOk, ""};
@@ -150,6 +153,8 @@ class FailingSecondary : public SecondaryInterface {
   Uptane::InstalledImageInfo firmware_info;
   // Simulate a user abort during sendFirmware
   bool abort_during_send_firmware{false};
+  // When false, primary will not fetch/store image for this secondary (handler-download mode).
+  bool needs_image_file_on_primary_{true};
 };
 
 struct TestOptions {
@@ -505,6 +510,35 @@ TEST(UptaneUpdateFailure, PrimaryInstallFailure) {
   EXPECT_EQ(expected_report, report);
 
   EXPECT_EQ(s.secondary->install_calls, 0);
+}
+
+/**
+ * When a target is only for a secondary that has needsImageFileOnPrimary() false
+ * (e.g. handler-download generic secondary), the primary should not fetch the
+ * image and downloadImages should still return success.
+ */
+TEST(UptaneUpdateFailure, NeedTargetFileOnPrimarySkipsFetchForHandlerDownloadSecondary) {
+  TestScaffolding s;  // NOLINT
+
+  EXPECT_NO_THROW(s.dut->initialize());
+  result::UpdateCheck const update_result = s.dut->fetchMeta();
+  EXPECT_EQ(update_result.status, result::UpdateStatus::kUpdatesAvailable);
+  ASSERT_FALSE(update_result.updates.empty());
+
+  // Use the secondary target from Director metadata (hasupdates has secondary_firmware.txt).
+  Uptane::EcuSerial const secondary_serial("secondary_ecu_serial");
+  auto const it = std::find_if(
+      update_result.updates.cbegin(), update_result.updates.cend(),
+      [&secondary_serial](const Uptane::Target &t) { return t.IsForEcu(secondary_serial); });
+  ASSERT_NE(it, update_result.updates.cend()) << "No target for secondary in Director metadata";
+  Uptane::Target const secondary_target = *it;
+
+  s.secondary->needs_image_file_on_primary_ = false;
+
+  result::Download download_result = s.dut->downloadImages({secondary_target});
+  EXPECT_EQ(download_result.status, result::DownloadStatus::kSuccess);
+  ASSERT_EQ(download_result.updates.size(), 1u);
+  EXPECT_EQ(download_result.updates[0].filename(), secondary_target.filename());
 }
 
 #ifndef __NO_MAIN__

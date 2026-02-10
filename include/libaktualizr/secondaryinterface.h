@@ -53,6 +53,13 @@ class SecondaryInterface {
   virtual data::InstallationResult putMetadata(const Uptane::Target& target) = 0;
   virtual bool ping() const = 0;
 
+  /**
+   * When false, the primary will not download or store this ECU's target image;
+   * the secondary obtains it itself (e.g. via action-handler download). Same
+   * idea as OSTree secondary. Default true (current behaviour).
+   */
+  virtual bool needsImageFileOnPrimary() const { return true; }
+
   // return 0 during initialization and -1 for error.
   virtual int32_t getRootVersion(bool director) const = 0;
   virtual data::InstallationResult putRoot(const std::string& root, bool director) = 0;

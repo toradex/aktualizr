@@ -21,6 +21,7 @@ class TorizonGenericSecondaryConfig : public ManagedSecondaryConfig {
   void dump(const boost::filesystem::path& file_full_path) const;
 
   boost::filesystem::path action_handler_path;
+  bool handler_downloads_firmware{false};
 };
 
 class TorizonGenericSecondary : public ManagedSecondary {
@@ -29,6 +30,8 @@ class TorizonGenericSecondary : public ManagedSecondary {
   std::string Type() const override { return TorizonGenericSecondaryConfig::Type; }
 
   bool ping() const override { return true; }
+
+  bool needsImageFileOnPrimary() const override;
 
   // Main methods being overridden from `ManagedSecondary`.
   bool getFirmwareInfo(Uptane::InstalledImageInfo& firmware_info) const override;
@@ -77,6 +80,7 @@ class TorizonGenericSecondary : public ManagedSecondary {
   const VarMap& getSharedVars(bool update = true) const;
 
   void getInstallVars(VarMap& vars, const Uptane::Target& target, const InstallInfo& info) const;
+  void getDownloadFirmwareVars(VarMap& vars, const Uptane::Target& target, const InstallInfo& info) const;
   void getCompleteInstallVars(VarMap& vars, const Uptane::Target& target) const;
 
   data::InstallationResult completeInstall(const Uptane::Target& target);

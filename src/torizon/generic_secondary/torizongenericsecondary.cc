@@ -14,7 +14,7 @@
 #include "torizongenericsecondary.h"
 
 static constexpr int CURRENT_INTERFACE_MAJOR = 1;
-static constexpr int CURRENT_INTERFACE_MINOR = 0;
+static constexpr int CURRENT_INTERFACE_MINOR = 1;
 
 namespace bp = boost::process;
 namespace bf = boost::filesystem;
@@ -33,6 +33,7 @@ TorizonGenericSecondaryConfig::TorizonGenericSecondaryConfig(const Json::Value& 
   target_name_path = json_config["target_name_path"].asString();
   metadata_path = json_config["metadata_path"].asString();
   action_handler_path = json_config["action_handler_path"].asString();
+  handler_downloads_firmware = json_config.get("handler_downloads_firmware", false).asBool();
 }
 
 std::vector<TorizonGenericSecondaryConfig> TorizonGenericSecondaryConfig::create_from_file(
@@ -64,6 +65,7 @@ void TorizonGenericSecondaryConfig::dump(const boost::filesystem::path& file_ful
   json_config["target_name_path"] = target_name_path.string();
   json_config["metadata_path"] = metadata_path.string();
   json_config["action_handler_path"] = action_handler_path.string();
+  json_config["handler_downloads_firmware"] = handler_downloads_firmware;
 
   Json::Value root;
   // Append to the config file if it already exists.
@@ -88,6 +90,10 @@ inline static boost::filesystem::path addNewExtension(const boost::filesystem::p
 
 TorizonGenericSecondary::TorizonGenericSecondary(const Primary::TorizonGenericSecondaryConfig& sconfig_in)
     : ManagedSecondary(dynamic_cast<const ManagedSecondaryConfig&>(sconfig_in)), config_(sconfig_in) {}
+
+bool TorizonGenericSecondary::needsImageFileOnPrimary() const {
+  return !config_.handler_downloads_firmware;
+}
 
 bool TorizonGenericSecondary::getFirmwareInfo(Uptane::InstalledImageInfo& firmware_info) const {
   const std::string action{"get-firmware-info"};
@@ -208,10 +214,99 @@ void TorizonGenericSecondary::getInstallVars(VarMap& vars, const Uptane::Target&
   // vars["SECONDARY_METADATA_PATH_OFFLINE"] = "{}";
 }
 
+// Action "download-install": used when handler_downloads_firmware is true. The handler
+// receives SECONDARY_TARGET_URI, SECONDARY_FIRMWARE_SHA256, SECONDARY_FIRMWARE_LENGTH,
+// SECONDARY_UPDATE_TYPE, SECONDARY_CUSTOM_METADATA, SECONDARY_TARGET_FILENAME, plus shared
+// vars (SECONDARY_HARDWARE_ID, SECONDARY_ECU_SERIAL, SECONDARY_FIRMWARE_PATH). The handler
+// must download from SECONDARY_TARGET_URI, verify (e.g. SHA-256), then apply. Stdout JSON
+// must include "status": "ok" | "failed" | "need-completion" and may include "message".
+// Exit code 0 with JSON, or 64/65 for request normal/error processing as with other actions.
+void TorizonGenericSecondary::getDownloadFirmwareVars(VarMap& vars, const Uptane::Target& target,
+                                                       const InstallInfo& info) const {
+  vars["SECONDARY_TARGET_URI"] = secondary_provider_->getTargetUri(target);
+  vars["SECONDARY_UPDATE_TYPE"] = Uptane::UpdateTypeToString(info.getUpdateType());
+  if (target.hashes().at(0).type() != Hash::Type::kSha256) {
+    throw std::runtime_error("main hash is not SHA-256");
+  }
+  vars["SECONDARY_FIRMWARE_SHA256"] = boost::algorithm::to_lower_copy(target.hashes().at(0).HashString());
+  vars["SECONDARY_FIRMWARE_LENGTH"] = std::to_string(target.length());
+  vars["SECONDARY_CUSTOM_METADATA"] = Utils::jsonToCanonicalStr(target.custom_data());
+  vars["SECONDARY_TARGET_FILENAME"] = target.filename();
+}
+
 data::InstallationResult TorizonGenericSecondary::install(const Uptane::Target& target, const InstallInfo& info,
                                                           const api::FlowControlToken* flow_control) {
   if (flow_control != nullptr && flow_control->hasAborted()) {
     return data::InstallationResult(data::ResultCode::Numeric::kOperationCancelled, "");
+  }
+
+  if (config_.handler_downloads_firmware) {
+    // Handler-download mode: pass URL and metadata to action handler; do not
+    // fetch or store the image on the primary. Handler is responsible for
+    // download and verification (same contract as OSTree secondary).
+    const std::string action{"download-install"};
+    boost::filesystem::path new_tgtname = getNewTargetNamePath();
+    {
+      LOG_TRACE << "Storing target name " << target.filename() << " into " << new_tgtname;
+      Utils::writeFile(new_tgtname, target.filename());
+    }
+
+    VarMap vars;
+    getDownloadFirmwareVars(vars, target, info);
+
+    Json::Value output;
+    // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
+    ActionHandlerResult handler_result = callActionHandler(action, vars, &output);
+
+    bool proc_output = false;
+    data::ResultCode::Numeric result_code = data::ResultCode::Numeric::kUnknown;
+    switch (handler_result) {
+      case ActionHandlerResult::NotAvailable:
+      case ActionHandlerResult::ProcNoOutput:
+        result_code = data::ResultCode::Numeric::kGeneralError;
+        break;
+      case ActionHandlerResult::ReqErrorProc:
+        result_code = data::ResultCode::Numeric::kInstallFailed;
+        break;
+      case ActionHandlerResult::ReqNormalProc:
+        result_code = data::ResultCode::Numeric::kOk;
+        break;
+      case ActionHandlerResult::ProcOutput:
+        proc_output = true;
+        break;
+      default:
+        LOG_WARNING << action << ": Unhandled action-handler result: " << static_cast<int>(handler_result);
+        result_code = data::ResultCode::Numeric::kGeneralError;
+        break;
+    }
+
+    if (proc_output) {
+      if (output["status"]) {
+        const std::string status = output["status"].asString();
+        if (status == "ok") {
+          result_code = data::ResultCode::Numeric::kOk;
+        } else if (status == "failed") {
+          result_code = data::ResultCode::Numeric::kInstallFailed;
+        } else if (status == "need-completion") {
+          result_code = data::ResultCode::Numeric::kNeedCompletion;
+        } else {
+          LOG_WARNING << action << ": Action-handler " << config_.action_handler_path
+                      << " output unexpected value for field 'status'";
+          result_code = data::ResultCode::Numeric::kGeneralError;
+        }
+      } else {
+        LOG_WARNING << action << ": Action-handler " << config_.action_handler_path
+                    << " must always output field 'status'";
+        result_code = data::ResultCode::Numeric::kGeneralError;
+      }
+      if (output["message"]) {
+        LOG_INFO << "Action-handler " << config_.action_handler_path << " message: " << output["message"].asString();
+      }
+    }
+
+    maybeFinishInstall(result_code, boost::filesystem::path(), new_tgtname);
+
+    return data::InstallationResult(result_code, output["message"].asString());
   }
 
   const std::string action{"install"};
@@ -419,28 +514,36 @@ void TorizonGenericSecondary::maybeFinishInstall(data::ResultCode::Numeric resul
                                                  const boost::filesystem::path& new_tgtname) {
   boost::system::error_code ec;
   if (result_code == data::ResultCode::Numeric::kOk) {
-    LOG_TRACE << "Renaming " << new_fwpath << " as " << config_.firmware_path;
-    boost::filesystem::rename(new_fwpath, config_.firmware_path, ec);
-    if (ec) {
-      LOG_WARNING << "Error renaming " << new_fwpath << " as " << config_.firmware_path << ": " << ec.message();
+    if (!new_fwpath.empty()) {
+      LOG_TRACE << "Renaming " << new_fwpath << " as " << config_.firmware_path;
+      boost::filesystem::rename(new_fwpath, config_.firmware_path, ec);
+      if (ec) {
+        LOG_WARNING << "Error renaming " << new_fwpath << " as " << config_.firmware_path << ": " << ec.message();
+      }
     }
-    LOG_TRACE << "Renaming " << new_tgtname << " as " << config_.target_name_path;
-    boost::filesystem::rename(new_tgtname, config_.target_name_path, ec);
-    if (ec) {
-      LOG_WARNING << "Error renaming " << new_tgtname << " as " << config_.target_name_path << ": " << ec.message();
+    if (!new_tgtname.empty()) {
+      LOG_TRACE << "Renaming " << new_tgtname << " as " << config_.target_name_path;
+      boost::filesystem::rename(new_tgtname, config_.target_name_path, ec);
+      if (ec) {
+        LOG_WARNING << "Error renaming " << new_tgtname << " as " << config_.target_name_path << ": " << ec.message();
+      }
     }
   } else if (result_code == data::ResultCode::Numeric::kNeedCompletion) {
     // Postpone decision again.
   } else {
-    LOG_TRACE << "Deleting " << new_fwpath;
-    boost::filesystem::remove(new_fwpath, ec);
-    if (ec) {
-      LOG_WARNING << "Error deleting file " << new_fwpath << ": " << ec.message();
+    if (!new_fwpath.empty()) {
+      LOG_TRACE << "Deleting " << new_fwpath;
+      boost::filesystem::remove(new_fwpath, ec);
+      if (ec) {
+        LOG_WARNING << "Error deleting file " << new_fwpath << ": " << ec.message();
+      }
     }
-    LOG_TRACE << "Deleting " << new_tgtname;
-    boost::filesystem::remove(new_tgtname, ec);
-    if (ec) {
-      LOG_WARNING << "Error deleting file " << new_tgtname << ": " << ec.message();
+    if (!new_tgtname.empty()) {
+      LOG_TRACE << "Deleting " << new_tgtname;
+      boost::filesystem::remove(new_tgtname, ec);
+      if (ec) {
+        LOG_WARNING << "Error deleting file " << new_tgtname << ": " << ec.message();
+      }
     }
   }
 }
