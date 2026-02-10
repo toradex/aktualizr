@@ -124,8 +124,7 @@ std::string SecondaryProvider::getTargetUri(const Uptane::Target& target) const 
   if (!target.uri().empty()) {
     return target.uri();
   }
-  const std::string default_url =
-      config_.uptane.repo_server + "/targets/" + Utils::urlEncode(target.filename());
+  std::string default_url = config_.uptane.repo_server + "/targets/" + Utils::urlEncode(target.filename());
   if (http_ != nullptr) {
     const std::string resolved = http_->getEffectiveUrl(default_url);
     if (!resolved.empty()) {

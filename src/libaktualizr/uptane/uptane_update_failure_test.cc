@@ -527,9 +527,8 @@ TEST(UptaneUpdateFailure, NeedTargetFileOnPrimarySkipsFetchForHandlerDownloadSec
 
   // Use the secondary target from Director metadata (hasupdates has secondary_firmware.txt).
   Uptane::EcuSerial const secondary_serial("secondary_ecu_serial");
-  auto const it = std::find_if(
-      update_result.updates.cbegin(), update_result.updates.cend(),
-      [&secondary_serial](const Uptane::Target &t) { return t.IsForEcu(secondary_serial); });
+  auto const it = std::find_if(update_result.updates.cbegin(), update_result.updates.cend(),
+                               [&secondary_serial](const Uptane::Target &t) { return t.IsForEcu(secondary_serial); });
   ASSERT_NE(it, update_result.updates.cend()) << "No target for secondary in Director metadata";
   Uptane::Target const secondary_target = *it;
 

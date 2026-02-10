@@ -1,6 +1,7 @@
 #include "primary/sotauptaneclient.h"
 
 #include <fnmatch.h>
+#include <algorithm>
 #include <fstream>
 #include <memory>
 #include <utility>
@@ -829,16 +830,13 @@ bool SotaUptaneClient::needTargetFileOnPrimary(const Uptane::Target &target) {
   if (target.IsForEcu(primary_ecu_serial)) {
     return true;
   }
-  for (const auto &ecu : target.ecus()) {
+  return std::any_of(target.ecus().begin(), target.ecus().end(), [&](const auto &ecu) {
     if (ecu.first == primary_ecu_serial) {
-      continue;
+      return false;
     }
     auto it = secondaries.find(ecu.first);
-    if (it != secondaries.end() && it->second->needsImageFileOnPrimary()) {
-      return true;
-    }
-  }
-  return false;
+    return it != secondaries.end() && it->second->needsImageFileOnPrimary();
+  });
 }
 
 std::pair<bool, Uptane::Target> SotaUptaneClient::downloadImage(const Uptane::Target &target, UpdateType utype) {

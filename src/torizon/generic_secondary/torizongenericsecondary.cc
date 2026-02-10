@@ -91,9 +91,7 @@ inline static boost::filesystem::path addNewExtension(const boost::filesystem::p
 TorizonGenericSecondary::TorizonGenericSecondary(const Primary::TorizonGenericSecondaryConfig& sconfig_in)
     : ManagedSecondary(dynamic_cast<const ManagedSecondaryConfig&>(sconfig_in)), config_(sconfig_in) {}
 
-bool TorizonGenericSecondary::needsImageFileOnPrimary() const {
-  return !config_.handler_downloads_firmware;
-}
+bool TorizonGenericSecondary::needsImageFileOnPrimary() const { return !config_.handler_downloads_firmware; }
 
 bool TorizonGenericSecondary::getFirmwareInfo(Uptane::InstalledImageInfo& firmware_info) const {
   const std::string action{"get-firmware-info"};
@@ -222,7 +220,7 @@ void TorizonGenericSecondary::getInstallVars(VarMap& vars, const Uptane::Target&
 // must include "status": "ok" | "failed" | "need-completion" and may include "message".
 // Exit code 0 with JSON, or 64/65 for request normal/error processing as with other actions.
 void TorizonGenericSecondary::getDownloadFirmwareVars(VarMap& vars, const Uptane::Target& target,
-                                                       const InstallInfo& info) const {
+                                                      const InstallInfo& info) const {
   vars["SECONDARY_TARGET_URI"] = secondary_provider_->getTargetUri(target);
   vars["SECONDARY_UPDATE_TYPE"] = Uptane::UpdateTypeToString(info.getUpdateType());
   if (target.hashes().at(0).type() != Hash::Type::kSha256) {
@@ -267,8 +265,7 @@ data::ResultCode::Numeric TorizonGenericSecondary::resolveHandlerResult(ActionHa
                   << " output unexpected value for field 'status'";
     }
   } else {
-    LOG_WARNING << action << ": Action-handler " << config_.action_handler_path
-                << " must always output field 'status'";
+    LOG_WARNING << action << ": Action-handler " << config_.action_handler_path << " must always output field 'status'";
   }
 
   if (output["message"]) {

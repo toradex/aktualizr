@@ -90,7 +90,7 @@ class TorizonGenericSecondary : public ManagedSecondary {
    * values. Used by install() and completeInstall().
    */
   data::ResultCode::Numeric resolveHandlerResult(ActionHandlerResult handler_result, const Json::Value& output,
-                                                  const std::string& action) const;
+                                                 const std::string& action) const;
 
   data::InstallationResult completeInstall(const Uptane::Target& target);
   void maybeFinishInstall(data::ResultCode::Numeric result_code, const boost::filesystem::path& new_fwpath,

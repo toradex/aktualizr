@@ -9,10 +9,9 @@ class HttpInterface;
 
 class SecondaryProviderBuilder {
  public:
-  static std::shared_ptr<SecondaryProvider> Build(
-      Config& config, const std::shared_ptr<const INvStorage>& storage,
-      const std::shared_ptr<const PackageManagerInterface>& package_manager,
-      const std::shared_ptr<HttpInterface>& http = nullptr) {
+  static std::shared_ptr<SecondaryProvider> Build(Config &config, const std::shared_ptr<const INvStorage> &storage,
+                                                  const std::shared_ptr<const PackageManagerInterface> &package_manager,
+                                                  const std::shared_ptr<HttpInterface> &http = nullptr) {
     return std::make_shared<SecondaryProvider>(SecondaryProvider(config, storage, package_manager, http));
   }
   ~SecondaryProviderBuilder() = default;
