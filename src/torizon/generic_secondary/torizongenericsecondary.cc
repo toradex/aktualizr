@@ -234,6 +234,50 @@ void TorizonGenericSecondary::getDownloadFirmwareVars(VarMap& vars, const Uptane
   vars["SECONDARY_TARGET_FILENAME"] = target.filename();
 }
 
+data::ResultCode::Numeric TorizonGenericSecondary::resolveHandlerResult(ActionHandlerResult handler_result,
+                                                                        const Json::Value& output,
+                                                                        const std::string& action) const {
+  switch (handler_result) {
+    case ActionHandlerResult::NotAvailable:
+    case ActionHandlerResult::ProcNoOutput:
+      return data::ResultCode::Numeric::kGeneralError;
+    case ActionHandlerResult::ReqErrorProc:
+      return data::ResultCode::Numeric::kInstallFailed;
+    case ActionHandlerResult::ReqNormalProc:
+      return data::ResultCode::Numeric::kOk;
+    case ActionHandlerResult::ProcOutput:
+      break;  // Fall through to process JSON output below.
+    default:
+      LOG_WARNING << action << ": Unhandled action-handler result: " << static_cast<int>(handler_result);
+      return data::ResultCode::Numeric::kGeneralError;
+  }
+
+  // Process JSON output from the action handler.
+  data::ResultCode::Numeric result_code = data::ResultCode::Numeric::kGeneralError;
+  if (output["status"]) {
+    const std::string status = output["status"].asString();
+    if (status == "ok") {
+      result_code = data::ResultCode::Numeric::kOk;
+    } else if (status == "failed") {
+      result_code = data::ResultCode::Numeric::kInstallFailed;
+    } else if (status == "need-completion") {
+      result_code = data::ResultCode::Numeric::kNeedCompletion;
+    } else {
+      LOG_WARNING << action << ": Action-handler " << config_.action_handler_path
+                  << " output unexpected value for field 'status'";
+    }
+  } else {
+    LOG_WARNING << action << ": Action-handler " << config_.action_handler_path
+                << " must always output field 'status'";
+  }
+
+  if (output["message"]) {
+    LOG_INFO << "Action-handler " << config_.action_handler_path << " message: " << output["message"].asString();
+  }
+
+  return result_code;
+}
+
 data::InstallationResult TorizonGenericSecondary::install(const Uptane::Target& target, const InstallInfo& info,
                                                           const api::FlowControlToken* flow_control) {
   if (flow_control != nullptr && flow_control->hasAborted()) {
@@ -257,52 +301,7 @@ data::InstallationResult TorizonGenericSecondary::install(const Uptane::Target& 
     Json::Value output;
     // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
     ActionHandlerResult handler_result = callActionHandler(action, vars, &output);
-
-    bool proc_output = false;
-    data::ResultCode::Numeric result_code = data::ResultCode::Numeric::kUnknown;
-    switch (handler_result) {
-      case ActionHandlerResult::NotAvailable:
-      case ActionHandlerResult::ProcNoOutput:
-        result_code = data::ResultCode::Numeric::kGeneralError;
-        break;
-      case ActionHandlerResult::ReqErrorProc:
-        result_code = data::ResultCode::Numeric::kInstallFailed;
-        break;
-      case ActionHandlerResult::ReqNormalProc:
-        result_code = data::ResultCode::Numeric::kOk;
-        break;
-      case ActionHandlerResult::ProcOutput:
-        proc_output = true;
-        break;
-      default:
-        LOG_WARNING << action << ": Unhandled action-handler result: " << static_cast<int>(handler_result);
-        result_code = data::ResultCode::Numeric::kGeneralError;
-        break;
-    }
-
-    if (proc_output) {
-      if (output["status"]) {
-        const std::string status = output["status"].asString();
-        if (status == "ok") {
-          result_code = data::ResultCode::Numeric::kOk;
-        } else if (status == "failed") {
-          result_code = data::ResultCode::Numeric::kInstallFailed;
-        } else if (status == "need-completion") {
-          result_code = data::ResultCode::Numeric::kNeedCompletion;
-        } else {
-          LOG_WARNING << action << ": Action-handler " << config_.action_handler_path
-                      << " output unexpected value for field 'status'";
-          result_code = data::ResultCode::Numeric::kGeneralError;
-        }
-      } else {
-        LOG_WARNING << action << ": Action-handler " << config_.action_handler_path
-                    << " must always output field 'status'";
-        result_code = data::ResultCode::Numeric::kGeneralError;
-      }
-      if (output["message"]) {
-        LOG_INFO << "Action-handler " << config_.action_handler_path << " message: " << output["message"].asString();
-      }
-    }
+    data::ResultCode::Numeric result_code = resolveHandlerResult(handler_result, output, action);
 
     maybeFinishInstall(result_code, boost::filesystem::path(), new_tgtname);
 
@@ -335,63 +334,7 @@ data::InstallationResult TorizonGenericSecondary::install(const Uptane::Target& 
   Json::Value output;
   // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
   ActionHandlerResult handler_result = callActionHandler(action, vars, &output);
-
-  bool proc_output = false;
-  data::ResultCode::Numeric result_code = data::ResultCode::Numeric::kUnknown;
-  switch (handler_result) {
-    case ActionHandlerResult::NotAvailable:
-    case ActionHandlerResult::ProcNoOutput:
-      // Unexpected condition:
-      result_code = data::ResultCode::Numeric::kGeneralError;
-      break;
-    case ActionHandlerResult::ReqErrorProc:
-      result_code = data::ResultCode::Numeric::kInstallFailed;
-      break;
-    case ActionHandlerResult::ReqNormalProc:
-      // Normal processing is handled as okay.
-      result_code = data::ResultCode::Numeric::kOk;
-      break;
-    case ActionHandlerResult::ProcOutput:
-      // Perform further processing to decide what to do.
-      proc_output = true;
-      break;
-    default:
-      // Unexpected condition:
-      LOG_WARNING << action << ": Unhandled action-handler result: " << static_cast<int>(handler_result);
-      result_code = data::ResultCode::Numeric::kGeneralError;
-      break;
-  }
-
-  if (proc_output) {
-    // ---
-    // Handle "status" field (required):
-    // ---
-    if (output["status"]) {
-      const std::string status = output["status"].asString();
-      if (status == "ok") {
-        result_code = data::ResultCode::Numeric::kOk;
-      } else if (status == "failed") {
-        result_code = data::ResultCode::Numeric::kInstallFailed;
-      } else if (status == "need-completion") {
-        result_code = data::ResultCode::Numeric::kNeedCompletion;
-      } else {
-        LOG_WARNING << action << ": Action-handler " << config_.action_handler_path
-                    << " output unexpected value for field 'status'";
-        result_code = data::ResultCode::Numeric::kGeneralError;
-      }
-    } else {
-      LOG_WARNING << action << ": Action-handler " << config_.action_handler_path
-                  << " must always output field 'status'";
-      result_code = data::ResultCode::Numeric::kGeneralError;
-    }
-
-    // ---
-    // Handle "message" field:
-    // ---
-    if (output["message"]) {
-      LOG_INFO << "Action-handler " << config_.action_handler_path << " message: " << output["message"].asString();
-    }
-  }
+  data::ResultCode::Numeric result_code = resolveHandlerResult(handler_result, output, action);
 
   maybeFinishInstall(result_code, new_fwpath, new_tgtname);
 
@@ -420,62 +363,7 @@ data::InstallationResult TorizonGenericSecondary::completeInstall(const Uptane::
   Json::Value output;
   // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
   ActionHandlerResult handler_result = callActionHandler(action, vars, &output);
-
-  bool proc_output = false;
-  data::ResultCode::Numeric result_code = data::ResultCode::Numeric::kUnknown;
-  switch (handler_result) {
-    case ActionHandlerResult::NotAvailable:
-    case ActionHandlerResult::ProcNoOutput:
-      // Unexpected condition:
-      result_code = data::ResultCode::Numeric::kGeneralError;
-      break;
-    case ActionHandlerResult::ReqErrorProc:
-      result_code = data::ResultCode::Numeric::kInstallFailed;
-      break;
-    case ActionHandlerResult::ReqNormalProc:
-      result_code = data::ResultCode::Numeric::kOk;
-      break;
-    case ActionHandlerResult::ProcOutput:
-      // Perform further processing to decide what to do.
-      proc_output = true;
-      break;
-    default:
-      // Unexpected condition:
-      LOG_WARNING << action << ": Unhandled action-handler result: " << static_cast<int>(handler_result);
-      result_code = data::ResultCode::Numeric::kGeneralError;
-      break;
-  }
-
-  if (proc_output) {
-    // ---
-    // Handle "status" field (required):
-    // ---
-    if (output["status"]) {
-      const std::string status = output["status"].asString();
-      if (status == "ok") {
-        result_code = data::ResultCode::Numeric::kOk;
-      } else if (status == "failed") {
-        result_code = data::ResultCode::Numeric::kInstallFailed;
-      } else if (status == "need-completion") {
-        result_code = data::ResultCode::Numeric::kNeedCompletion;
-      } else {
-        LOG_WARNING << action << ": Action-handler " << config_.action_handler_path
-                    << " output unexpected value for field 'status'";
-        result_code = data::ResultCode::Numeric::kGeneralError;
-      }
-    } else {
-      LOG_WARNING << action << ": Action-handler " << config_.action_handler_path
-                  << " must always output field 'status'";
-      result_code = data::ResultCode::Numeric::kGeneralError;
-    }
-
-    // ---
-    // Handle "message" field:
-    // ---
-    if (output["message"]) {
-      LOG_INFO << "Action-handler " << config_.action_handler_path << " message: " << output["message"].asString();
-    }
-  }
+  data::ResultCode::Numeric result_code = resolveHandlerResult(handler_result, output, action);
 
   maybeFinishInstall(result_code, getNewFirmwarePath(), getNewTargetNamePath());
 

@@ -83,6 +83,15 @@ class TorizonGenericSecondary : public ManagedSecondary {
   void getDownloadFirmwareVars(VarMap& vars, const Uptane::Target& target, const InstallInfo& info) const;
   void getCompleteInstallVars(VarMap& vars, const Uptane::Target& target) const;
 
+  /**
+   * Map an ActionHandlerResult (and optional JSON output) to a ResultCode.
+   * Handles the switch on handler_result, parses the "status" and "message"
+   * fields from the handler's JSON output, and logs warnings for unexpected
+   * values. Used by install() and completeInstall().
+   */
+  data::ResultCode::Numeric resolveHandlerResult(ActionHandlerResult handler_result, const Json::Value& output,
+                                                  const std::string& action) const;
+
   data::InstallationResult completeInstall(const Uptane::Target& target);
   void maybeFinishInstall(data::ResultCode::Numeric result_code, const boost::filesystem::path& new_fwpath,
                           const boost::filesystem::path& new_tgtname);
