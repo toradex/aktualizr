@@ -65,7 +65,7 @@ if (CCACHE)
 endif (CCACHE)
 
 # find all required libraries
-set(BOOST_COMPONENTS log_setup log system filesystem program_options)
+set(BOOST_COMPONENTS log_setup log filesystem program_options)
 set(Boost_USE_STATIC_LIBS OFF)
 add_definitions(-DBOOST_LOG_DYN_LINK)
 
