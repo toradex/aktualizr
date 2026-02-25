@@ -4,6 +4,7 @@
 // #define EXTRA_DEBUG
 
 #include <json/json.h>
+#include <boost/algorithm/string.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/process.hpp>
 
