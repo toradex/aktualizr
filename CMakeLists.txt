@@ -91,6 +91,13 @@ find_package(SQLite3 REQUIRED)
 find_package(Git)
 find_package(Asn1c REQUIRED)
 
+# TODO: This can be removed once boost gets bumped to v1.86+, because of boost/process v2 lib
+if(Boost_FOUND)
+    if(Boost_VERSION VERSION_GREATER_EQUAL "1.86.0")
+        add_compile_definitions(BOOST_PROCESS_VERSION=1)
+    endif()
+endif()
+
 if(NOT AKTUALIZR_VERSION)
     if (EXISTS ${PROJECT_SOURCE_DIR}/VERSION)
         file(READ ${PROJECT_SOURCE_DIR}/VERSION AKTUALIZR_VERSION)

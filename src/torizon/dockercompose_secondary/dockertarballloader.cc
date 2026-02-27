@@ -8,7 +8,13 @@
 #include <json/value.h>
 #include <boost/algorithm/string.hpp>
 #include <boost/filesystem/path.hpp>
+// TODO: Consider upgrading the code to use boost/process v2 API when bumping the minimal boost version.
+#include <boost/version.hpp>
+#if BOOST_VERSION >= 108600
+#include <boost/process/v1.hpp>
+#else
 #include <boost/process.hpp>
+#endif
 
 #include <array>
 #include <csignal>
