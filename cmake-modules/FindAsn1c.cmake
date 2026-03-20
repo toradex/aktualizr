@@ -38,6 +38,14 @@ function(compile_asn1_lib)
 
     file(GLOB ASN1_GENERATED ${ASN1_GEN_DIR}/*.c)
 
+    # drop lines "found in" added to source and header files to avoid warnings in Yocto
+    file(GLOB ASN1_GENERATED_ALL ${ASN1_GEN_DIR}/*.c ${ASN1_GEN_DIR}/*.h)
+    foreach(SG ${ASN1_GENERATED_ALL})
+      file(READ "${SG}" CONTENT)
+      string(REGEX REPLACE "\\*[ \t]*found in [^\n]*\n" "*\n" CONTENT "${CONTENT}")
+      file(WRITE "${SG}" "${CONTENT}")
+    endforeach()
+
     add_custom_command(
         OUTPUT ${ASN1_GENERATED}
         COMMAND ${ASN1C} ${ASN1C_FLAGS} ${S}
