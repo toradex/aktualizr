@@ -169,6 +169,10 @@ data::InstallationResult OstreeManager::pullLocal(const boost::filesystem::path 
     throw std::logic_error("Invalid type of Target, got " + target.type() + ", expected OSTREE");
   }
 
+  bool require_static_deltas = false;
+  if (boost::filesystem::exists(srcrepo_path / "deltas"))
+    require_static_deltas = true;
+
   // The "OSTree server" in this case will be a local directory.
   const std::string ostree_server = "file://" + boost::filesystem::absolute(srcrepo_path).string();
   const uint32_t pullflags = OSTREE_REPO_PULL_FLAGS_UNTRUSTED;
@@ -211,9 +215,12 @@ data::InstallationResult OstreeManager::pullLocal(const boost::filesystem::path 
   g_variant_builder_add(&builder, "{s@v}", "disable-sign-verify", g_variant_new_variant(g_variant_new_boolean(TRUE)));
   g_variant_builder_add(&builder, "{s@v}", "disable-sign-verify-summary",
                         g_variant_new_variant(g_variant_new_boolean(TRUE)));
+  g_variant_builder_add(&builder, "{s@v}", "require-static-deltas",
+			g_variant_new_variant(g_variant_new_boolean(require_static_deltas ? TRUE : FALSE)));
   GVariant *options = g_variant_builder_end(&builder);
 
-  LOG_INFO << "Performing a local pull from " << ostree_server;
+  LOG_INFO << "Performing a local pull from " << ostree_server
+	   << " with require-static-deltas=" << (require_static_deltas ? "true" : "false");
 
   GObjectUniquePtr<OstreeAsyncProgress> progress = nullptr;
   PullMetaStruct mt(target, nullptr, g_cancellable_new(), std::move(progress_cb));
