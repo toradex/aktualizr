@@ -27,11 +27,17 @@ function(compile_asn1_lib)
     # clean previously generated files
     set(ASN1_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated/asn1/)
     file(MAKE_DIRECTORY ${ASN1_GEN_DIR})
-    set(S)
+    set(SOURCES_ABS)
+    set(SOURCES_REL)
     foreach(SA ${AKTUALIZR_ASN1_SOURCES})
-        list(APPEND S ${CMAKE_CURRENT_SOURCE_DIR}/${SA})
+        list(APPEND SOURCES_ABS ${CMAKE_CURRENT_SOURCE_DIR}/${SA})
+        message(STATUS "ABS_PATH=${CMAKE_CURRENT_SOURCE_DIR}/${SA}")
+        file(RELATIVE_PATH RELPATH ${ASN1_GEN_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/${SA})
+        list(APPEND SOURCES_REL ${RELPATH})
     endforeach()
-    execute_process(COMMAND ${ASN1C} ${ASN1C_FLAGS} ${S}
+    # invoke ASN.1 compiler with relative paths to avoid QA warnings in Yocto
+    execute_process(
+        COMMAND ${ASN1C} ${ASN1C_FLAGS} ${SOURCES_REL}
         WORKING_DIRECTORY ${ASN1_GEN_DIR}
         OUTPUT_QUIET
         )
@@ -40,9 +46,9 @@ function(compile_asn1_lib)
 
     add_custom_command(
         OUTPUT ${ASN1_GENERATED}
-        COMMAND ${ASN1C} ${ASN1C_FLAGS} ${S}
+        COMMAND ${ASN1C} ${ASN1C_FLAGS} ${SOURCES_REL}
         WORKING_DIRECTORY ${ASN1_GEN_DIR}
-        DEPENDS ${S}
+        DEPENDS ${SOURCES_ABS}
         )
 
     list(REMOVE_ITEM ASN1_GENERATED ${ASN1_GEN_DIR}/converter-example.c ${ASN1_GEN_DIR}/converter-sample.c)
