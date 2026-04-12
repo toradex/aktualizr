@@ -139,7 +139,7 @@ For torizon-minimal, where the user builds a service directly in Yocto, they can
 Finally, the entire feature can be disabled by setting `offline_logs_enabled` to false:
 
     [logger]
-    offline_logs_enabled = "path/mylogfile.db"
+    offline_logs_enabled = false
 
 # Build Configuration
 
