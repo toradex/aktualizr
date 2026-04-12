@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <sqlite3.h>
 
 #include <boost/filesystem.hpp>
 
@@ -361,6 +362,62 @@ TEST(OfflineLogsDb, OpenRefusesSymlinkToFile) {
   // Opening via symlink should fail
   OfflineLogsDb db(symlink_path);
   EXPECT_FALSE(db.Ok()) << "Open() should refuse to follow symlinks";
+}
+
+TEST(OfflineLogsDb, OpenRefusesSymlinkToDirectoryInPath) {
+  // sqlite changed behaviour between v3.38.5 and 3.39.0 with this commit:
+  //
+  // commit e8346d0a889c89ec8a78e65abc33257a6c6fb81a
+  // Author: drh <>
+  // Date:   Wed May 11 16:46:27 2022 +0000
+  //     For the unix VFS, rewrite the xFullPathname method so that it automatically
+  //     resolves all symbolic links, rendering a canonical pathname that contains
+  //     no symlinks.
+  //     FossilOrigin-Name: 40c9273d0e0e74e1df22e996a5d486e838f4320defd2121e2d95eeed8aea6235
+  //
+  // Versions prior to 3.39.0, such as 3.34.1 in Debian Bullseye do not handle symlinks in the
+  // middle of the path.
+
+  if (sqlite3_libversion_number() < 3039000) {
+    GTEST_SKIP() << "sqlite versions before 3.39.0 do not handle nofollow in this case";
+  }
+
+  TemporaryDirectory temp_dir;
+
+  // Create a real directory that will be the symlink target
+  auto real_dir = temp_dir.Path() / "real_dir";
+  boost::filesystem::create_directory(real_dir);
+
+  // Create a symlink to that directory
+  auto symlink_dir = temp_dir.Path() / "symlink_dir";
+  boost::filesystem::create_directory_symlink(real_dir, symlink_dir);
+  ASSERT_TRUE(boost::filesystem::is_symlink(symlink_dir));
+
+  // Opening a database whose path passes through the symlinked directory should fail
+  OfflineLogsDb db(symlink_dir / "update-logs.db");
+  EXPECT_FALSE(db.Ok()) << "Open() should refuse paths containing a symlink directory component";
+}
+
+TEST(OfflineLogsDb, OpenRefusesSymlinkToDirectoryInPath2) {
+  // See notes for OpenRefusesSymlinkToDirectoryInPath above
+  if (sqlite3_libversion_number() < 3039000) {
+    GTEST_SKIP() << "sqlite versions before 3.39.0 do not handle nofollow in this case";
+  }
+  TemporaryDirectory temp_dir;
+
+  // Create a real directory that will be the symlink target
+  auto real_dir = temp_dir.Path() / "real_dir" / "sub";
+  auto sub_dir = real_dir / "sub";
+  boost::filesystem::create_directories(sub_dir);
+
+  // Create a symlink to that directory
+  auto symlink_dir = temp_dir.Path() / "symlink_dir";
+  boost::filesystem::create_directory_symlink(real_dir, symlink_dir);
+  ASSERT_TRUE(boost::filesystem::is_symlink(symlink_dir));
+
+  // Opening a database whose path passes through the symlinked directory should fail
+  OfflineLogsDb db(symlink_dir / "sub" / "update-logs.db");
+  EXPECT_FALSE(db.Ok()) << "Open() should refuse paths containing a symlink directory component";
 }
 
 TEST(OfflineLogsDb, OpenRefusesSymlinkToNonexistent) {
