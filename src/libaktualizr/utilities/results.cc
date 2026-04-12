@@ -61,7 +61,7 @@ std::ostream& operator<<(std::ostream& os, const PutManifestStatus status) {
     case PutManifestStatus::kUnprovisioned:
       os << "Unprovisioned";
       break;
-    case PutManifestStatus::kCanceled:
+    case PutManifestStatus::kCancelled:
       os << "Cancelled";
       break;
     default:

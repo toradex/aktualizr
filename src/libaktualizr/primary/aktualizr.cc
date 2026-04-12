@@ -548,7 +548,7 @@ bool Aktualizr::SetInstallationRawReport(const std::string &custom_raw_report) {
 
 std::future<result::PutManifestResult> Aktualizr::SendManifest(const Json::Value &custom) {
   std::function<result::PutManifestResult()> task([this, custom]() { return uptane_client_->putManifest(custom); });
-  return api_queue_->enqueue(std::move(task), {Uptane::Manifest(), result::PutManifestStatus::kCanceled});
+  return api_queue_->enqueue(std::move(task), {Uptane::Manifest(), result::PutManifestStatus::kCancelled});
 }
 
 result::Pause Aktualizr::Pause() {

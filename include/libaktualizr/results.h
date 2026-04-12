@@ -133,7 +133,7 @@ enum class PutManifestStatus {
   kUpdateAlreadyPending,
   kNoNetwork,
   kUnprovisioned,
-  kCanceled,
+  kCancelled,
 };
 
 std::ostream& operator<<(std::ostream& os, PutManifestStatus put_manifest_status);

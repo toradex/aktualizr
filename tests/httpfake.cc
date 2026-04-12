@@ -43,7 +43,7 @@ HttpResponse HttpFake::get(const std::string &url, int64_t maxsize,
     std::cout << "URL requested: " << url << "\n";
 
     if (flow_control != nullptr && flow_control->hasAborted()) {
-      return HttpResponse("", 0, CURLE_ABORTED_BY_CALLBACK, "Canceled by FlowControlToken");
+      return HttpResponse("", 0, CURLE_ABORTED_BY_CALLBACK, "Cancelled by FlowControlToken");
     }
 
     std::string new_url = url;
