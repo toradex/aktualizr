@@ -28,11 +28,11 @@ TEST(config, OfflineLogsDefaults) {
   Config conf;
   EXPECT_TRUE(conf.logger.offline_logs_enabled);
   EXPECT_EQ(conf.logger.offline_logs_file, "update-logs.db");
-  ASSERT_EQ(conf.logger.offline_capture_services.size(), 4);
-  EXPECT_EQ(conf.logger.offline_capture_services[0], "aktualizr");
-  EXPECT_EQ(conf.logger.offline_capture_services[1], "aktualizr-torizon");
-  EXPECT_EQ(conf.logger.offline_capture_services[2], "docker-compose");
-  EXPECT_EQ(conf.logger.offline_capture_services[3], "greenboot-status");
+  ASSERT_EQ(conf.logger.capture_services.size(), 4);
+  EXPECT_EQ(conf.logger.capture_services[0], "aktualizr");
+  EXPECT_EQ(conf.logger.capture_services[1], "aktualizr-torizon");
+  EXPECT_EQ(conf.logger.capture_services[2], "docker-compose");
+  EXPECT_EQ(conf.logger.capture_services[3], "greenboot-status");
 }
 
 /* Test parsing offline_logs_enabled from config */
@@ -56,30 +56,30 @@ TEST(config, OfflineLogsFile) {
   EXPECT_EQ(conf.logger.offline_logs_file, "/var/log/offline.db");
 }
 
-/* Test parsing offline_capture_services from config */
+/* Test parsing capture_services from config */
 TEST(config, OfflineCaptureServices) {
   Config conf;
-  conf.updateFromTomlString("[logger]\noffline_capture_services = \"myservice1 myservice2\"\n");
-  ASSERT_EQ(conf.logger.offline_capture_services.size(), 2);
-  EXPECT_EQ(conf.logger.offline_capture_services[0], "myservice1");
-  EXPECT_EQ(conf.logger.offline_capture_services[1], "myservice2");
+  conf.updateFromTomlString("[logger]\ncapture_services = \"myservice1 myservice2\"\n");
+  ASSERT_EQ(conf.logger.capture_services.size(), 2);
+  EXPECT_EQ(conf.logger.capture_services[0], "myservice1");
+  EXPECT_EQ(conf.logger.capture_services[1], "myservice2");
 }
 
-/* Test empty offline_capture_services results in empty vector */
+/* Test empty capture_services results in empty vector */
 TEST(config, OfflineCaptureServicesEmpty) {
   Config conf;
-  conf.updateFromTomlString("[logger]\noffline_capture_services = \"\"\n");
-  EXPECT_TRUE(conf.logger.offline_capture_services.empty());
+  conf.updateFromTomlString("[logger]\ncapture_services = \"\"\n");
+  EXPECT_TRUE(conf.logger.capture_services.empty());
 }
 
-/* Test offline_capture_services handles multiple spaces */
+/* Test capture_services handles multiple spaces */
 TEST(config, OfflineCaptureServicesMultipleSpaces) {
   Config conf;
-  conf.updateFromTomlString("[logger]\noffline_capture_services = \"svc1   svc2  svc3\"\n");
-  ASSERT_EQ(conf.logger.offline_capture_services.size(), 3);
-  EXPECT_EQ(conf.logger.offline_capture_services[0], "svc1");
-  EXPECT_EQ(conf.logger.offline_capture_services[1], "svc2");
-  EXPECT_EQ(conf.logger.offline_capture_services[2], "svc3");
+  conf.updateFromTomlString("[logger]\ncapture_services = \"svc1   svc2  svc3\"\n");
+  ASSERT_EQ(conf.logger.capture_services.size(), 3);
+  EXPECT_EQ(conf.logger.capture_services[0], "svc1");
+  EXPECT_EQ(conf.logger.capture_services[1], "svc2");
+  EXPECT_EQ(conf.logger.capture_services[2], "svc3");
 }
 
 TEST(config, TomlBasic) {

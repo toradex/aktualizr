@@ -14,7 +14,7 @@ namespace fs = boost::filesystem;
 OfflineLogsManager::OfflineLogsManager(const Config& config)
     : enabled_(config.logger.offline_logs_enabled),
       logs_filename_(config.logger.offline_logs_file),
-      capture_services_(config.logger.offline_capture_services) {
+      capture_services_(config.logger.capture_services) {
   if (!enabled_) {
     LOG_DEBUG << "OfflineLogsManager: disabled via configuration";
   }

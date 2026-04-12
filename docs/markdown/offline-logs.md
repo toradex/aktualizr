@@ -131,7 +131,7 @@ For torizon-minimal, where the user builds a service directly in Yocto, they can
 `/usr/lib/sota/conf.d/90-myapp.toml` (for example):
 
     [logger]
-    offline_capture_services = "aktualizr aktualizr-torizon docker-compose myservice"
+    capture_services = "aktualizr aktualizr-torizon docker-compose myservice"
 
 (Service names may be space separated since systemd unit names cannot contain spaces
 [ref](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html#Description)).
