@@ -167,7 +167,7 @@ struct TelemetryConfig {
   void writeToStream(std::ostream& out_stream) const;
 };
 
-enum class RollbackMode { kBootloaderNone = 0, kUbootGeneric, kUbootMasked };
+enum class RollbackMode { kBootloaderNone = 0, kUbootGeneric, kUbootMasked, kGrubGeneric };
 std::ostream& operator<<(std::ostream& os, RollbackMode mode);
 
 struct BootloaderConfig {
@@ -175,6 +175,7 @@ struct BootloaderConfig {
   boost::filesystem::path reboot_sentinel_dir{"/var/run/aktualizr-session"};
   boost::filesystem::path reboot_sentinel_name{"need_reboot"};
   std::string reboot_command{"/sbin/reboot"};
+  boost::filesystem::path grub_envfile{"/media/efi/EFI/BOOT/grubenv"};
 
   void updateFromPropertyTree(const boost::property_tree::ptree& pt);
   void writeToStream(std::ostream& out_stream) const;
