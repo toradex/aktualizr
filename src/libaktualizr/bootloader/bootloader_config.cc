@@ -10,6 +10,9 @@ std::ostream& operator<<(std::ostream& os, RollbackMode mode) {
     case RollbackMode::kUbootMasked:
       mode_s = "uboot_masked";
       break;
+    case RollbackMode::kGrubGeneric:
+      mode_s = "grub_generic";
+      break;
     default:
       mode_s = "none";
       break;
@@ -27,6 +30,8 @@ inline void CopyFromConfig(RollbackMode& dest, const std::string& option_name, c
       dest = RollbackMode::kUbootGeneric;
     } else if (mode == "uboot_masked") {
       dest = RollbackMode::kUbootMasked;
+    } else if (mode == "grub_generic") {
+      dest = RollbackMode::kGrubGeneric;
     } else {
       dest = RollbackMode::kBootloaderNone;
     }
@@ -38,6 +43,7 @@ void BootloaderConfig::updateFromPropertyTree(const boost::property_tree::ptree&
   CopyFromConfig(reboot_sentinel_dir, "reboot_sentinel_dir", pt);
   CopyFromConfig(reboot_sentinel_name, "reboot_sentinel_name", pt);
   CopyFromConfig(reboot_command, "reboot_command", pt);
+  CopyFromConfig(grub_envfile, "grub_envfile", pt);
 }
 
 void BootloaderConfig::writeToStream(std::ostream& out_stream) const {
@@ -45,4 +51,5 @@ void BootloaderConfig::writeToStream(std::ostream& out_stream) const {
   writeOption(out_stream, reboot_sentinel_dir, "reboot_sentinel_dir");
   writeOption(out_stream, reboot_sentinel_name, "reboot_sentinel_name");
   writeOption(out_stream, reboot_command, "reboot_command");
+  writeOption(out_stream, grub_envfile, "grub_envfile");
 }
