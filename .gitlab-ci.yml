@@ -15,7 +15,7 @@ image: docker:latest
 
 variables:
   RUNNER_TAG:
-    value: "saas-linux-medium-amd64"
+    value: "amd64"
     description: 'Runner tag.'
   E:
     value: ""
