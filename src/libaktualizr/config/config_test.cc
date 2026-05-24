@@ -45,6 +45,22 @@ TEST(config, OfflineLogsEnabled) {
   EXPECT_TRUE(conf.logger.offline_logs_enabled);
 }
 
+/* Test default value for online_logs_enabled */
+TEST(config, OnlineLogsEnabledDefault) {
+  Config conf;
+  EXPECT_TRUE(conf.logger.online_logs_enabled);
+}
+
+/* Test parsing online_logs_enabled from config */
+TEST(config, OnlineLogsEnabled) {
+  Config conf;
+  conf.updateFromTomlString("[logger]\nonline_logs_enabled = false\n");
+  EXPECT_FALSE(conf.logger.online_logs_enabled);
+
+  conf.updateFromTomlString("[logger]\nonline_logs_enabled = true\n");
+  EXPECT_TRUE(conf.logger.online_logs_enabled);
+}
+
 /* Test parsing offline_logs_file from config */
 TEST(config, OfflineLogsFile) {
   Config conf;

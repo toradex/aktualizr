@@ -26,6 +26,7 @@ void LoggerConfig::updateFromPropertyTree(const boost::property_tree::ptree& pt)
   CopyFromConfig(loglevel, "loglevel", pt);
   CopyFromConfig(offline_logs_enabled, "offline_logs_enabled", pt);
   CopyFromConfig(offline_logs_file, "offline_logs_file", pt);
+  CopyFromConfig(online_logs_enabled, "online_logs_enabled", pt);
 
   // Handle capture_services as a space-separated string
   boost::optional<std::string> services_str = pt.get_optional<std::string>("capture_services");
@@ -39,4 +40,5 @@ void LoggerConfig::writeToStream(std::ostream& out_stream) const {
   writeOption(out_stream, offline_logs_enabled, "offline_logs_enabled");
   writeOption(out_stream, offline_logs_file, "offline_logs_file");
   writeOption(out_stream, JoinWithSpaces(capture_services), "capture_services");
+  writeOption(out_stream, online_logs_enabled, "online_logs_enabled");
 }
