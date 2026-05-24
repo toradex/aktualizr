@@ -43,18 +43,17 @@ void Bootloader::setBootOK() const {
       }
       break;
     case RollbackMode::kGrubGeneric: {
-        const std::string env = config_.grub_envfile.string();
-        if (Utils::shell("grub-editenv " + env + " set bootcount=0", &sink) != 0) {
-          LOG_WARNING << "Failed resetting bootcount via grub-editenv";
-        }
-        if (Utils::shell("grub-editenv " + env + " set upgrade_available=0", &sink) != 0) {
-          LOG_WARNING << "Failed resetting upgrade_available via grub-editenv";
-        }
-        if (Utils::shell("grub-editenv " + env + " set rollback=0", &sink) != 0) {
-          LOG_WARNING << "Failed resetting rollback via grub-editenv";
-        }
+      const std::string env = config_.grub_envfile.string();
+      if (Utils::shell("grub-editenv " + env + " set bootcount=0", &sink) != 0) {
+        LOG_WARNING << "Failed resetting bootcount via grub-editenv";
       }
-      break;
+      if (Utils::shell("grub-editenv " + env + " set upgrade_available=0", &sink) != 0) {
+        LOG_WARNING << "Failed resetting upgrade_available via grub-editenv";
+      }
+      if (Utils::shell("grub-editenv " + env + " set rollback=0", &sink) != 0) {
+        LOG_WARNING << "Failed resetting rollback via grub-editenv";
+      }
+    } break;
     default:
       throw NotImplementedException();
   }
@@ -85,21 +84,20 @@ void Bootloader::updateNotify() const {
       }
       break;
     case RollbackMode::kGrubGeneric: {
-        const std::string env = config_.grub_envfile.string();
-        if (Utils::shell("grub-editenv " + env + " set bootcount=0", &sink) != 0) {
-          LOG_WARNING << "Failed resetting bootcount via grub-editenv";
-        }
-        if (Utils::shell("grub-editenv " + env + " set upgrade_available=1", &sink) != 0) {
-          LOG_WARNING << "Failed setting upgrade_available via grub-editenv";
-        }
-        if (Utils::shell("grub-editenv " + env + " set rollback=0", &sink) != 0) {
-          LOG_WARNING << "Failed resetting rollback via grub-editenv";
-        }
-        if (Utils::shell("grub-editenv " + env + " set default=0", &sink) != 0) {
-          LOG_WARNING << "Failed resetting default via grub-editenv";
-        }
+      const std::string env = config_.grub_envfile.string();
+      if (Utils::shell("grub-editenv " + env + " set bootcount=0", &sink) != 0) {
+        LOG_WARNING << "Failed resetting bootcount via grub-editenv";
       }
-      break;
+      if (Utils::shell("grub-editenv " + env + " set upgrade_available=1", &sink) != 0) {
+        LOG_WARNING << "Failed setting upgrade_available via grub-editenv";
+      }
+      if (Utils::shell("grub-editenv " + env + " set rollback=0", &sink) != 0) {
+        LOG_WARNING << "Failed resetting rollback via grub-editenv";
+      }
+      if (Utils::shell("grub-editenv " + env + " set default=0", &sink) != 0) {
+        LOG_WARNING << "Failed resetting default via grub-editenv";
+      }
+    } break;
     default:
       throw NotImplementedException();
   }
