@@ -80,11 +80,9 @@ HttpResponse HttpFake::post(const std::string &url, const Json::Value &data) {
 }
 
 std::future<HttpResponse> HttpFake::downloadAsync(const std::string &url, curl_write_callback write_cb,
-                                        curl_xferinfo_callback progress_cb, void *userp, curl_off_t from,
-                                        CurlHandler *easyp) {
+                                                  curl_xferinfo_callback progress_cb, void *userp, curl_off_t from) {
   (void)userp;
   (void)from;
-  (void)easyp;
   (void)progress_cb;
 
   std::cout << "URL requested: " << url << "\n";

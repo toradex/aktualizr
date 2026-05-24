@@ -151,6 +151,37 @@ TEST(HttpClient, UpdateHeader) {
   EXPECT_EQ(response["status"].asString(), "good");
 }
 
+/* Verify that concurrent post() calls from multiple threads do not crash or
+ * corrupt data.  The fake server is started with -f (intermittent 503s), so
+ * we only assert that the curl call itself succeeded (no transport error) and
+ * that every thread ran to completion. */
+// NOLINTNEXTLINE(*non-const*)
+TEST(HttpClient, ConcurrentPosts) {
+  HttpClient http;
+
+  std::vector<std::thread> threads;
+  threads.reserve(4);
+  std::vector<bool> results(4, false);
+  for (int i = 0; i < 4; i++) {
+    threads.emplace_back([&http, &results, i]() {
+      for (int j = 0; j < 10; j++) {
+        Json::Value data;
+        data["thread"] = i;
+        data["iteration"] = j;
+        auto resp = http.post(server + "/events", data);
+        EXPECT_EQ(resp.curl_code, CURLE_OK);
+      }
+      results[static_cast<size_t>(i)] = true;
+    });
+  }
+  for (auto& t : threads) {
+    t.join();
+  }
+  for (int i = 0; i < 4; i++) {
+    EXPECT_TRUE(results[static_cast<size_t>(i)]);
+  }
+}
+
 #ifndef __NO_MAIN__
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);

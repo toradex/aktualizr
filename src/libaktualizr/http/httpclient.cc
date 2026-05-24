@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <sstream>
+#include <utility>
 
 #include "logging/logging.h"
 #include "utilities/utils.h"
@@ -59,170 +60,163 @@ static int ProgressHandler(void* clientp, curl_off_t dltotal, curl_off_t dlnow, 
   return 0;
 }
 
-HttpClient::HttpClient(const std::vector<std::string>* extra_headers) {
-  curl = curl_easy_init();
-  if (curl == nullptr) {
+HttpClient::HttpClient(const std::vector<std::string>* extra_headers) : template_handle_{curl_easy_init(), nullptr} {
+  if (template_handle_.get() == nullptr) {
     throw std::runtime_error("Could not initialize curl");
   }
-  headers = nullptr;
 
-  curlEasySetoptWrapper(curl, CURLOPT_NOSIGNAL, 1L);
-  curlEasySetoptWrapper(curl, CURLOPT_TIMEOUT, 60L);
-  curlEasySetoptWrapper(curl, CURLOPT_CONNECTTIMEOUT, 60L);
-  curlEasySetoptWrapper(curl, CURLOPT_CAPATH, Utils::getCaPath());
+  template_handle_.setopt(CURLOPT_NOSIGNAL, 1L);
+  template_handle_.setopt(CURLOPT_TIMEOUT, 60L);
+  template_handle_.setopt(CURLOPT_CONNECTTIMEOUT, 60L);
+  template_handle_.setopt(CURLOPT_CAPATH, Utils::getCaPath());
 
-  curlEasySetoptWrapper(curl, CURLOPT_FOLLOWLOCATION, 1L);
-  curlEasySetoptWrapper(curl, CURLOPT_MAXREDIRS, 10L);
-  curlEasySetoptWrapper(curl, CURLOPT_POSTREDIR, CURL_REDIR_POST_301);
+  template_handle_.setopt(CURLOPT_FOLLOWLOCATION, 1L);
+  template_handle_.setopt(CURLOPT_MAXREDIRS, 10L);
+  template_handle_.setopt(CURLOPT_POSTREDIR, CURL_REDIR_POST_301);
 
   // let curl use our write function
-  curlEasySetoptWrapper(curl, CURLOPT_WRITEFUNCTION, writeString);
-  curlEasySetoptWrapper(curl, CURLOPT_WRITEDATA, NULL);
+  template_handle_.setopt(CURLOPT_WRITEFUNCTION, writeString);
+  template_handle_.setopt(CURLOPT_WRITEDATA, NULL);
 
-  curlEasySetoptWrapper(curl, CURLOPT_VERBOSE, get_curlopt_verbose());
+  template_handle_.setopt(CURLOPT_VERBOSE, get_curlopt_verbose());
 
-  headers = curl_slist_append(headers, "Accept: */*");
+  template_handle_.appendHeader("Accept: */*");
 
   if (extra_headers != nullptr) {
     for (const auto& header : *extra_headers) {
-      headers = curl_slist_append(headers, header.c_str());
+      template_handle_.appendHeader(header);
     }
   }
-  curlEasySetoptWrapper(curl, CURLOPT_USERAGENT, Utils::getUserAgent());
+  template_handle_.setopt(CURLOPT_USERAGENT, Utils::getUserAgent());
 }
 
 HttpClient::HttpClient(const std::string& socket) : HttpClient() {
-  curlEasySetoptWrapper(curl, CURLOPT_UNIX_SOCKET_PATH, socket.c_str());
+  template_handle_.setopt(CURLOPT_UNIX_SOCKET_PATH, socket.c_str());
 }
 
 HttpClient::HttpClient(const HttpClient& curl_in)
-    : HttpInterface(curl_in), pkcs11_key(curl_in.pkcs11_key), pkcs11_cert(curl_in.pkcs11_key) {
-  curl = curl_easy_duphandle(curl_in.curl);
-  headers = curl_slist_dup(curl_in.headers);
-}
+    : HttpInterface(curl_in),
+      template_handle_(curl_easy_duphandle(curl_in.template_handle_.get()),
+                       curl_slist_dup(curl_in.template_handle_.headers())),
+      pkcs11_key(curl_in.pkcs11_key),
+      pkcs11_cert(curl_in.pkcs11_key) {}
 
 const CurlGlobalInitWrapper HttpClient::manageCurlGlobalInit_{};
 
-HttpClient::~HttpClient() {
-  curl_slist_free_all(headers);
-  curl_easy_cleanup(curl);
+HttpClient::CurlHandle HttpClient::dupCurl() {
+  std::lock_guard<std::mutex> lock(curl_mutex_);
+  CurlHandle res(Utils::curlDupHandleWrapper(template_handle_.get(), pkcs11_key),
+                 curl_slist_dup(template_handle_.headers()));
+  res.setopt(CURLOPT_HTTPHEADER, res.headers());
+  if (pkcs11_cert) {
+    res.setopt(CURLOPT_SSLCERTTYPE, "ENG");
+  }
+  res.setopt(CURLOPT_LOW_SPEED_TIME, speed_limit_time_interval_);
+  res.setopt(CURLOPT_LOW_SPEED_LIMIT, speed_limit_bytes_per_sec_);
+  return res;
 }
 
 void HttpClient::setCerts(const std::string& ca, CryptoSource ca_source, const std::string& cert,
                           CryptoSource cert_source, const std::string& pkey, CryptoSource pkey_source) {
-  curlEasySetoptWrapper(curl, CURLOPT_SSL_VERIFYPEER, 1);
-  curlEasySetoptWrapper(curl, CURLOPT_SSL_VERIFYHOST, 2);
-  curlEasySetoptWrapper(curl, CURLOPT_USE_SSL, CURLUSESSL_ALL);
+  std::lock_guard<std::mutex> lock(curl_mutex_);
+  template_handle_.setopt(CURLOPT_SSL_VERIFYPEER, 1);
+  template_handle_.setopt(CURLOPT_SSL_VERIFYHOST, 2);
+  template_handle_.setopt(CURLOPT_USE_SSL, CURLUSESSL_ALL);
 
   if (ca_source == CryptoSource::kPkcs11) {
     throw std::runtime_error("Accessing CA certificate on PKCS11 devices isn't currently supported");
   }
   std::unique_ptr<TemporaryFile> tmp_ca_file = std_::make_unique<TemporaryFile>("tls-ca");
   tmp_ca_file->PutContents(ca);
-  curlEasySetoptWrapper(curl, CURLOPT_CAINFO, tmp_ca_file->Path().c_str());
+  template_handle_.setopt(CURLOPT_CAINFO, tmp_ca_file->Path().c_str());
   tls_ca_file = std::move_if_noexcept(tmp_ca_file);
 
   if (cert_source == CryptoSource::kPkcs11) {
-    curlEasySetoptWrapper(curl, CURLOPT_SSLCERT, cert.c_str());
-    curlEasySetoptWrapper(curl, CURLOPT_SSLCERTTYPE, "ENG");
+    template_handle_.setopt(CURLOPT_SSLCERT, cert.c_str());
+    template_handle_.setopt(CURLOPT_SSLCERTTYPE, "ENG");
   } else {  // cert_source == CryptoSource::kFile
     std::unique_ptr<TemporaryFile> tmp_cert_file = std_::make_unique<TemporaryFile>("tls-cert");
     tmp_cert_file->PutContents(cert);
-    curlEasySetoptWrapper(curl, CURLOPT_SSLCERT, tmp_cert_file->Path().c_str());
-    curlEasySetoptWrapper(curl, CURLOPT_SSLCERTTYPE, "PEM");
+    template_handle_.setopt(CURLOPT_SSLCERT, tmp_cert_file->Path().c_str());
+    template_handle_.setopt(CURLOPT_SSLCERTTYPE, "PEM");
     tls_cert_file = std::move_if_noexcept(tmp_cert_file);
   }
   pkcs11_cert = (cert_source == CryptoSource::kPkcs11);
 
   if (pkey_source == CryptoSource::kPkcs11) {
-    curlEasySetoptWrapper(curl, CURLOPT_SSLENGINE, "pkcs11");
-    curlEasySetoptWrapper(curl, CURLOPT_SSLENGINE_DEFAULT, 1L);
-    curlEasySetoptWrapper(curl, CURLOPT_SSLKEY, pkey.c_str());
-    curlEasySetoptWrapper(curl, CURLOPT_SSLKEYTYPE, "ENG");
+    template_handle_.setopt(CURLOPT_SSLENGINE, "pkcs11");
+    template_handle_.setopt(CURLOPT_SSLENGINE_DEFAULT, 1L);
+    template_handle_.setopt(CURLOPT_SSLKEY, pkey.c_str());
+    template_handle_.setopt(CURLOPT_SSLKEYTYPE, "ENG");
   } else {  // pkey_source == CryptoSource::kFile
     std::unique_ptr<TemporaryFile> tmp_pkey_file = std_::make_unique<TemporaryFile>("tls-pkey");
     tmp_pkey_file->PutContents(pkey);
-    curlEasySetoptWrapper(curl, CURLOPT_SSLKEY, tmp_pkey_file->Path().c_str());
-    curlEasySetoptWrapper(curl, CURLOPT_SSLKEYTYPE, "PEM");
+    template_handle_.setopt(CURLOPT_SSLKEY, tmp_pkey_file->Path().c_str());
+    template_handle_.setopt(CURLOPT_SSLKEYTYPE, "PEM");
     tls_pkey_file = std::move_if_noexcept(tmp_pkey_file);
   }
   pkcs11_key = (pkey_source == CryptoSource::kPkcs11);
 }
 
 HttpResponse HttpClient::get(const std::string& url, int64_t maxsize, const api::FlowControlToken* flow_control) {
-  CURL* curl_get = Utils::curlDupHandleWrapper(curl, pkcs11_key);
-
-  curlEasySetoptWrapper(curl_get, CURLOPT_HTTPHEADER, headers);
-
-  if (pkcs11_cert) {
-    curlEasySetoptWrapper(curl_get, CURLOPT_SSLCERTTYPE, "ENG");
-  }
+  auto curl_get = dupCurl();
 
   // Clear POSTFIELDS to remove any lingering references to strings that have
   // probably since been deallocated.
-  curlEasySetoptWrapper(curl_get, CURLOPT_POSTFIELDS, "");
-  curlEasySetoptWrapper(curl_get, CURLOPT_URL, url.c_str());
-  curlEasySetoptWrapper(curl_get, CURLOPT_HTTPGET, 1L);
+  curl_get.setopt(CURLOPT_POSTFIELDS, "");
+  curl_get.setopt(CURLOPT_URL, url.c_str());
+  curl_get.setopt(CURLOPT_HTTPGET, 1L);
   if (flow_control != nullptr) {
     // Handle cancellation
-    curlEasySetoptWrapper(curl_get, CURLOPT_NOPROGRESS, 0);
-    curlEasySetoptWrapper(curl_get, CURLOPT_XFERINFOFUNCTION, ProgressHandler);
-    curlEasySetoptWrapper(curl_get, CURLOPT_XFERINFODATA, flow_control);
+    curl_get.setopt(CURLOPT_NOPROGRESS, 0);
+    curl_get.setopt(CURLOPT_XFERINFOFUNCTION, ProgressHandler);
+    curl_get.setopt(CURLOPT_XFERINFODATA, flow_control);
   }
 
   LOG_DEBUG << "GET " << url;
-  HttpResponse response = perform(curl_get, RETRY_TIMES, maxsize);
-  curl_easy_cleanup(curl_get);
-  return response;
+  return perform(curl_get.get(), RETRY_TIMES, maxsize);
 }
 
 std::string HttpClient::getEffectiveUrl(const std::string& url) {
-  CURL* curl_resolve = Utils::curlDupHandleWrapper(curl, pkcs11_key);
-  if (curl_resolve == nullptr) {
+  auto curl_resolve = dupCurl();
+  if (curl_resolve.get() == nullptr) {
     return "";
   }
-  curlEasySetoptWrapper(curl_resolve, CURLOPT_POSTFIELDS, "");
-  curlEasySetoptWrapper(curl_resolve, CURLOPT_URL, url.c_str());
-  curlEasySetoptWrapper(curl_resolve, CURLOPT_HTTPGET, 1L);
+  curl_resolve.setopt(CURLOPT_POSTFIELDS, "");
+  curl_resolve.setopt(CURLOPT_URL, url.c_str());
+  curl_resolve.setopt(CURLOPT_HTTPGET, 1L);
   // Use a range request to minimise body transfer while still following
   // redirects. Unlike CURLOPT_NOBODY (HEAD), range GETs follow 3xx chains.
   // If the server ignores Range and sends the full body, cap transfer size so
   // we don't pull a full image. We perform directly (not via perform()) so
   // CURLE_FILESIZE_EXCEEDED is only logged at DEBUG and we still return the
   // effective URL.
-  curlEasySetoptWrapper(curl_resolve, CURLOPT_RANGE, "0-0");
-  curlEasySetoptWrapper(curl_resolve, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(1));
+  curl_resolve.setopt(CURLOPT_RANGE, "0-0");
+  curl_resolve.setopt(CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(1));
 
   // Perform directly: we don't need perform()'s retry/error-logging since we
   // only care about CURLINFO_EFFECTIVE_URL, not the response body or status.
   WriteStringArg discard;
-  curlEasySetoptWrapper(curl_resolve, CURLOPT_WRITEDATA, static_cast<void*>(&discard));
-  CURLcode res = curl_easy_perform(curl_resolve);
+  curl_resolve.setopt(CURLOPT_WRITEDATA, static_cast<void*>(&discard));
+  CURLcode res = curl_easy_perform(curl_resolve.get());
 
   char* effective_url = nullptr;
-  curl_easy_getinfo(curl_resolve, CURLINFO_EFFECTIVE_URL, &effective_url);
+  curl_easy_getinfo(curl_resolve.get(), CURLINFO_EFFECTIVE_URL, &effective_url);
 
   if (res != CURLE_OK) {
     LOG_DEBUG << "getEffectiveUrl: curl error " << res << " (" << curl_easy_strerror(res) << ") for " << url;
   }
 
-  std::string result = (effective_url != nullptr) ? effective_url : "";
-  curl_easy_cleanup(curl_resolve);
-  return result;
+  return (effective_url != nullptr) ? effective_url : "";
 }
 
 HttpResponse HttpClient::post(const std::string& url, const std::string& content_type, const std::string& data) {
-  CURL* curl_post = Utils::curlDupHandleWrapper(curl, pkcs11_key);
-  curl_slist* req_headers = curl_slist_dup(headers);
-  req_headers = curl_slist_append(req_headers, (std::string("Content-Type: ") + content_type).c_str());
-  curlEasySetoptWrapper(curl_post, CURLOPT_HTTPHEADER, req_headers);
-  curlEasySetoptWrapper(curl_post, CURLOPT_URL, url.c_str());
-  curlEasySetoptWrapper(curl_post, CURLOPT_POST, 1);
-  curlEasySetoptWrapper(curl_post, CURLOPT_POSTFIELDS, data.c_str());
-  auto result = perform(curl_post, RETRY_TIMES, HttpInterface::kPostRespLimit);
-  curl_easy_cleanup(curl_post);
-  curl_slist_free_all(req_headers);
-  return result;
+  auto guard = dupCurl();
+  guard.appendHeader("Content-Type: " + content_type);
+  guard.setopt(CURLOPT_URL, url.c_str());
+  guard.setopt(CURLOPT_POST, 1);
+  guard.setopt(CURLOPT_POSTFIELDS, data.c_str());
+  return perform(guard.get(), RETRY_TIMES, HttpInterface::kPostRespLimit);
 }
 
 HttpResponse HttpClient::post(const std::string& url, const Json::Value& data) {
@@ -232,17 +226,12 @@ HttpResponse HttpClient::post(const std::string& url, const Json::Value& data) {
 }
 
 HttpResponse HttpClient::put(const std::string& url, const std::string& content_type, const std::string& data) {
-  CURL* curl_put = Utils::curlDupHandleWrapper(curl, pkcs11_key);
-  curl_slist* req_headers = curl_slist_dup(headers);
-  req_headers = curl_slist_append(req_headers, (std::string("Content-Type: ") + content_type).c_str());
-  curlEasySetoptWrapper(curl_put, CURLOPT_HTTPHEADER, req_headers);
-  curlEasySetoptWrapper(curl_put, CURLOPT_URL, url.c_str());
-  curlEasySetoptWrapper(curl_put, CURLOPT_POSTFIELDS, data.c_str());
-  curlEasySetoptWrapper(curl_put, CURLOPT_CUSTOMREQUEST, "PUT");
-  HttpResponse result = perform(curl_put, RETRY_TIMES, HttpInterface::kPutRespLimit);
-  curl_easy_cleanup(curl_put);
-  curl_slist_free_all(req_headers);
-  return result;
+  auto guard = dupCurl();
+  guard.appendHeader("Content-Type: " + content_type);
+  guard.setopt(CURLOPT_URL, url.c_str());
+  guard.setopt(CURLOPT_POSTFIELDS, data.c_str());
+  guard.setopt(CURLOPT_CUSTOMREQUEST, "PUT");
+  return perform(guard.get(), RETRY_TIMES, HttpInterface::kPutRespLimit);
 }
 
 HttpResponse HttpClient::put(const std::string& url, const Json::Value& data) {
@@ -258,9 +247,6 @@ HttpResponse HttpClient::perform(CURL* curl_handler, int retry_times, int64_t si
     //    writeString callback takes care of the other case
     curlEasySetoptWrapper(curl_handler, CURLOPT_MAXFILESIZE_LARGE, size_limit);
   }
-  curlEasySetoptWrapper(curl_handler, CURLOPT_LOW_SPEED_TIME, speed_limit_time_interval_);
-  curlEasySetoptWrapper(curl_handler, CURLOPT_LOW_SPEED_LIMIT, speed_limit_bytes_per_sec_);
-
   WriteStringArg response_arg;
   response_arg.limit = size_limit;
   curlEasySetoptWrapper(curl_handler, CURLOPT_WRITEDATA, static_cast<void*>(&response_arg));
@@ -286,42 +272,32 @@ HttpResponse HttpClient::perform(CURL* curl_handler, int retry_times, int64_t si
 
 HttpResponse HttpClient::download(const std::string& url, curl_write_callback write_cb,
                                   curl_xferinfo_callback progress_cb, void* userp, curl_off_t from) {
-  return downloadAsync(url, write_cb, progress_cb, userp, from, nullptr).get();
+  return downloadAsync(url, write_cb, progress_cb, userp, from).get();
 }
 
 std::future<HttpResponse> HttpClient::downloadAsync(const std::string& url, curl_write_callback write_cb,
-                                                    curl_xferinfo_callback progress_cb, void* userp, curl_off_t from,
-                                                    CurlHandler* easyp) {
-  CURL* curl_download = Utils::curlDupHandleWrapper(curl, pkcs11_key);
+                                                    curl_xferinfo_callback progress_cb, void* userp, curl_off_t from) {
+  auto curl_download = dupCurl();
 
-  CurlHandler curlp = CurlHandler(curl_download, curl_easy_cleanup);
-
-  if (easyp != nullptr) {
-    *easyp = curlp;
-  }
-
-  curlEasySetoptWrapper(curl_download, CURLOPT_HTTPHEADER, headers);
-  curlEasySetoptWrapper(curl_download, CURLOPT_URL, url.c_str());
-  curlEasySetoptWrapper(curl_download, CURLOPT_HTTPGET, 1L);
-  curlEasySetoptWrapper(curl_download, CURLOPT_WRITEFUNCTION, write_cb);
-  curlEasySetoptWrapper(curl_download, CURLOPT_WRITEDATA, userp);
+  curl_download.setopt(CURLOPT_URL, url.c_str());
+  curl_download.setopt(CURLOPT_HTTPGET, 1L);
+  curl_download.setopt(CURLOPT_WRITEFUNCTION, write_cb);
+  curl_download.setopt(CURLOPT_WRITEDATA, userp);
   if (progress_cb != nullptr) {
-    curlEasySetoptWrapper(curl_download, CURLOPT_NOPROGRESS, 0);
-    curlEasySetoptWrapper(curl_download, CURLOPT_XFERINFOFUNCTION, progress_cb);
-    curlEasySetoptWrapper(curl_download, CURLOPT_XFERINFODATA, userp);
+    curl_download.setopt(CURLOPT_NOPROGRESS, 0);
+    curl_download.setopt(CURLOPT_XFERINFOFUNCTION, progress_cb);
+    curl_download.setopt(CURLOPT_XFERINFODATA, userp);
   }
-  curlEasySetoptWrapper(curl_download, CURLOPT_TIMEOUT, 0);
-  curlEasySetoptWrapper(curl_download, CURLOPT_LOW_SPEED_TIME, speed_limit_time_interval_);
-  curlEasySetoptWrapper(curl_download, CURLOPT_LOW_SPEED_LIMIT, speed_limit_bytes_per_sec_);
-  curlEasySetoptWrapper(curl_download, CURLOPT_RESUME_FROM_LARGE, from);
+  curl_download.setopt(CURLOPT_TIMEOUT, 0);
+  curl_download.setopt(CURLOPT_RESUME_FROM_LARGE, from);
 
   std::promise<HttpResponse> resp_promise;
   auto resp_future = resp_promise.get_future();
   std::thread(
-      [curlp](std::promise<HttpResponse> promise) {
-        CURLcode result = curl_easy_perform(curlp.get());
+      [handle = std::move(curl_download)](std::promise<HttpResponse> promise) {
+        CURLcode result = curl_easy_perform(handle.get());
         long http_code;  // NOLINT(google-runtime-int)
-        curl_easy_getinfo(curlp.get(), CURLINFO_RESPONSE_CODE, &http_code);
+        curl_easy_getinfo(handle.get(), CURLINFO_RESPONSE_CODE, &http_code);
         HttpResponse response("", http_code, result, (result != CURLE_OK) ? curl_easy_strerror(result) : "");
         promise.set_value(response);
       },
@@ -331,7 +307,7 @@ std::future<HttpResponse> HttpClient::downloadAsync(const std::string& url, curl
 }
 
 bool HttpClient::updateHeader(const std::string& name, const std::string& value) {
-  curl_slist* item = headers;
+  curl_slist* item = template_handle_.headers();
   std::string lookfor(name + ": ");
 
   while (item != nullptr) {
@@ -347,12 +323,13 @@ bool HttpClient::updateHeader(const std::string& name, const std::string& value)
 }
 
 void HttpClient::timeout(int64_t ms) {
+  std::lock_guard<std::mutex> lock(curl_mutex_);
   // curl_easy_setopt() takes a 'long' be very sure that we are passing
   // whatever the platform ABI thinks is a long, while keeping the external
   // interface a clang-tidy preferred int64
   auto ms_long = static_cast<long>(ms);  // NOLINT(google-runtime-int)
-  curlEasySetoptWrapper(curl, CURLOPT_TIMEOUT_MS, ms_long);
-  curlEasySetoptWrapper(curl, CURLOPT_CONNECTTIMEOUT_MS, ms_long);
+  template_handle_.setopt(CURLOPT_TIMEOUT_MS, ms_long);
+  template_handle_.setopt(CURLOPT_CONNECTTIMEOUT_MS, ms_long);
 }
 
 curl_slist* HttpClient::curl_slist_dup(curl_slist* sl) {

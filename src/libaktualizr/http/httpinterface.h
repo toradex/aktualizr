@@ -12,8 +12,6 @@
 #include "utilities/flow_control.h"
 #include "utilities/utils.h"
 
-using CurlHandler = std::shared_ptr<CURL>;
-
 struct HttpResponse {
   HttpResponse() = default;
   HttpResponse(std::string body_in, const long http_status_code_in,  //  NOLINT(google-runtime-int)
@@ -56,8 +54,14 @@ class HttpInterface {
   virtual HttpResponse download(const std::string &url, curl_write_callback write_cb,
                                 curl_xferinfo_callback progress_cb, void *userp, curl_off_t from) = 0;
   virtual std::future<HttpResponse> downloadAsync(const std::string &url, curl_write_callback write_cb,
-                                                  curl_xferinfo_callback progress_cb, void *userp, curl_off_t from,
-                                                  CurlHandler *easyp) = 0;
+                                                  curl_xferinfo_callback progress_cb, void *userp, curl_off_t from) = 0;
+  /**
+   * Set TLS client certificates for authentication.
+   *
+   * @warning This method mutates shared state and is serialised with the
+   * internal mutex. However, it should only be called during provisioning
+   * (before concurrent HTTP requests begin) race conditions.
+   */
   virtual void setCerts(const std::string &ca, CryptoSource ca_source, const std::string &cert,
                         CryptoSource cert_source, const std::string &pkey, CryptoSource pkey_source) = 0;
   static constexpr int64_t kNoLimit = 0;  // no limit the size of downloaded data

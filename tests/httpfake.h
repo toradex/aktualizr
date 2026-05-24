@@ -73,12 +73,11 @@ class HttpFake : public HttpInterface {
   }
 
   std::future<HttpResponse> downloadAsync(const std::string &url, curl_write_callback write_cb,
-                                          curl_xferinfo_callback progress_cb, void *userp, curl_off_t from,
-                                          CurlHandler *easyp) override;
+                                          curl_xferinfo_callback progress_cb, void *userp, curl_off_t from) override;
 
   HttpResponse download(const std::string &url, curl_write_callback write_cb, curl_xferinfo_callback progress_cb,
                         void *userp, curl_off_t from) override {
-    return downloadAsync(url, write_cb, progress_cb, userp, from, nullptr).get();
+    return downloadAsync(url, write_cb, progress_cb, userp, from).get();
   }
 
   std::vector<std::string> report_events() const { return report_events_; }
