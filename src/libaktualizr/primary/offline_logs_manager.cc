@@ -11,10 +11,11 @@
 
 namespace fs = boost::filesystem;
 
-OfflineLogsManager::OfflineLogsManager(const Config& config)
+OfflineLogsManager::OfflineLogsManager(const Config& config, std::shared_ptr<JournalHandle> journal_prototype)
     : enabled_(config.logger.offline_logs_enabled),
       logs_filename_(config.logger.offline_logs_file),
-      capture_services_(config.logger.capture_services) {
+      capture_services_(config.logger.capture_services),
+      journal_prototype_(std::move(journal_prototype)) {
   if (!enabled_) {
     LOG_DEBUG << "OfflineLogsManager: disabled via configuration";
   }
@@ -51,7 +52,7 @@ InstallId OfflineLogsManager::BeginInstall(const fs::path& offline_update_path, 
   fs::path db_path = ResolveLogsDbPath(offline_update_path);
   LOG_INFO << "OfflineLogsManager::BeginInstall: opening database at " << db_path;
 
-  db_ = std::make_unique<OfflineLogsDb>(db_path);
+  db_.emplace(db_path);
   if (!db_->Ok()) {
     LOG_WARNING << "OfflineLogsManager::BeginInstall: failed to open database at " << db_path;
     db_.reset();
@@ -68,10 +69,12 @@ InstallId OfflineLogsManager::BeginInstall(const fs::path& offline_update_path, 
   LOG_INFO << "OfflineLogsManager::BeginInstall: created install " << current_install_id_.Value() << " for device "
            << device_id << ", update '" << update_name << "' v" << update_version;
 
-  // Capture initial journal cursor so we can copy logs from this point forward
-  journal_cursor_ = JournalCopier::GetCurrentCursor();
-  if (!journal_cursor_.IsValid()) {
-    LOG_WARNING << "OfflineLogsManager::BeginInstall: failed to get journal cursor (journal logging disabled)";
+  // Open a journal handle for the lifetime of this install and seek to tail.
+  journal_handle_ = journal_prototype_ ? journal_prototype_->Clone() : nullptr;
+  if (!journal_handle_ || !*journal_handle_ || !journal_handle_->MoveTail()) {
+    LOG_WARNING
+        << "OfflineLogsManager::BeginInstall: failed to open journal or seek to tail (journal logging disabled)";
+    journal_handle_.reset();
   }
 
   return current_install_id_;
@@ -91,7 +94,7 @@ InstallId OfflineLogsManager::FindAndResumeInstall(const fs::path& offline_updat
     return InstallId();
   }
 
-  db_ = std::make_unique<OfflineLogsDb>(db_path);
+  db_.emplace(db_path);
   if (!db_->Ok()) {
     LOG_WARNING << "OfflineLogsManager::FindAndResumeInstall: failed to open database at " << db_path;
     db_.reset();
@@ -108,11 +111,14 @@ InstallId OfflineLogsManager::FindAndResumeInstall(const fs::path& offline_updat
   LOG_INFO << "OfflineLogsManager::FindAndResumeInstall: resumed install " << current_install_id_.Value()
            << " for device " << device_id;
 
-  // Capture a new journal cursor for post-reboot logging
-  // Note: We capture from now, not from the pre-reboot cursor, as we don't persist cursors across reboots
-  journal_cursor_ = JournalCopier::GetCurrentCursor();
-  if (!journal_cursor_.IsValid()) {
-    LOG_WARNING << "OfflineLogsManager::FindAndResumeInstall: failed to get journal cursor (journal logging disabled)";
+  // Open a journal handle for the lifetime of this install and seek to tail.
+  // Note: We capture from now, not from the pre-reboot cursor, as we don't
+  // persist cursors across reboots.
+  journal_handle_ = journal_prototype_ ? journal_prototype_->Clone() : nullptr;
+  if (!journal_handle_ || !*journal_handle_ || !journal_handle_->MoveTail()) {
+    LOG_WARNING << "OfflineLogsManager::FindAndResumeInstall: failed to open journal or seek to tail (journal logging "
+                   "disabled)";
+    journal_handle_.reset();
   }
 
   return current_install_id_;
@@ -123,17 +129,39 @@ void OfflineLogsManager::CaptureLogs() {
     return;
   }
 
-  if (!journal_cursor_.IsValid()) {
-    LOG_DEBUG << "OfflineLogsManager::CaptureLogs: no valid cursor, skipping journal capture";
+  if (!journal_handle_ || !*journal_handle_) {
+    LOG_DEBUG << "OfflineLogsManager::CaptureLogs: no valid journal handle, skipping journal capture";
     return;
   }
 
-  size_t entries_copied = JournalCopier::CopyFromCursor(journal_cursor_, capture_services_, *db_, current_install_id_);
+  int ret = 0;
+
+  size_t entries_copied = 0;
+  // Note: <0 means 'error'  0 means ' end' and >0 means 'made progress'
+  do {
+    ret = journal_handle_->Next();
+    if (ret < 0) {
+      LOG_WARNING << "OfflineLogsManager::CaptureLogs: failed to advance past cursor: " << strerror(-ret);
+    } else if (ret > 0 && capture_services_.ShouldCapture(*journal_handle_)) {
+      // Get message, timestamp, and unit
+      std::string message = journal_handle_->GetField("MESSAGE");
+      int64_t timestamp_us = journal_handle_->GetTimestamp();
+
+      if (!message.empty() && timestamp_us > 0) {
+        // Remove .service suffix for cleaner display
+        std::string service_name = journal_handle_->GetField("_SYSTEMD_UNIT");
+        if (service_name.size() >= 8 && service_name.substr(service_name.size() - 8) == ".service") {
+          service_name = service_name.substr(0, service_name.size() - 8);
+        }
+
+        db_->AddLogEntry(current_install_id_, timestamp_us, service_name, message);
+        ++entries_copied;
+      }
+    }
+  } while (ret > 0);
+
   LOG_INFO << "OfflineLogsManager::CaptureLogs: captured " << entries_copied << " journal entries for install "
            << current_install_id_.Value();
-
-  // Update cursor to current position for next capture
-  journal_cursor_ = JournalCopier::GetCurrentCursor();
 }
 
 void OfflineLogsManager::CaptureReports(INvStorage& storage) {
@@ -168,6 +196,7 @@ void OfflineLogsManager::CompleteInstall(int64_t report_counter, const Uptane::M
 
   // Reset state
   current_install_id_ = InstallId();
+  journal_handle_.reset();
   db_.reset();
 
   LOG_INFO << "OfflineLogsManager::CompleteInstall: install completed and database closed";

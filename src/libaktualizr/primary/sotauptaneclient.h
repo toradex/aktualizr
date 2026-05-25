@@ -26,6 +26,7 @@
 #include "logging/logging.h"
 #include "primary/consent.h"
 #include "primary/offline_logs_manager.h"
+#include "primary/online_logs_uploader.h"
 #include "provisioner.h"
 #include "reportqueue.h"
 #include "uptane/directorrepository.h"
@@ -57,7 +58,8 @@ class SotaUptaneClient {
   };
 
   SotaUptaneClient(Config &config_in, std::shared_ptr<INvStorage> storage_in, std::shared_ptr<HttpInterface> http_in,
-                   std::shared_ptr<event::Channel> events_channel_in, const api::FlowControlToken *flow_control);
+                   std::shared_ptr<event::Channel> events_channel_in, const api::FlowControlToken *flow_control,
+                   const std::shared_ptr<JournalHandle> &journal_prototype = nullptr);
 
   SotaUptaneClient(Config &config_in, const std::shared_ptr<INvStorage> &storage_in)
       : SotaUptaneClient(config_in, storage_in, std::make_shared<HttpClient>(), nullptr, nullptr) {}
@@ -239,6 +241,7 @@ class SotaUptaneClient {
   const api::FlowControlToken *flow_control_;
   bool connected_{true};
   OfflineLogsManager offline_logs_manager_;
+  OnlineLogsUploader online_logs_uploader_;
 };
 
 #endif  // SOTA_UPTANE_CLIENT_H_

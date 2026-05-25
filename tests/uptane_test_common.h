@@ -44,8 +44,10 @@ struct UptaneTestCommon {
     TestUptaneClient(Config &config_in,
                      std::shared_ptr<INvStorage> storage_in,
                      std::shared_ptr<HttpInterface> http_client,
-                     std::shared_ptr<event::Channel> events_channel_in):
-      SotaUptaneClient(config_in, storage_in, http_client, events_channel_in, &flow_control_) {
+                     std::shared_ptr<event::Channel> events_channel_in,
+                     std::shared_ptr<JournalHandle> journal_prototype = nullptr):
+      SotaUptaneClient(config_in, storage_in, http_client, events_channel_in, &flow_control_,
+                       std::move(journal_prototype)) {
 
       if (boost::filesystem::exists(config_in.uptane.secondary_config_file)) {
           for (const auto& item : Primary::VirtualSecondaryConfig::create_from_file(config_in.uptane.secondary_config_file)) {
@@ -56,10 +58,19 @@ struct UptaneTestCommon {
 
     TestUptaneClient(Config &config_in,
                      std::shared_ptr<INvStorage> storage_in,
-                     std::shared_ptr<HttpInterface> http_client) : TestUptaneClient(config_in, storage_in, http_client, nullptr) {}
+                     std::shared_ptr<HttpInterface> http_client)
+        : TestUptaneClient(config_in, storage_in, http_client, std::shared_ptr<event::Channel>(nullptr)) {}
+
+
+    TestUptaneClient(Config &config_in,
+                     std::shared_ptr<INvStorage> storage_in,
+                     std::shared_ptr<HttpInterface> http_client,
+                     std::shared_ptr<JournalHandle> journal_prototype)
+        : TestUptaneClient(config_in, storage_in, http_client, nullptr, std::move(journal_prototype)) {}
 
     TestUptaneClient(Config &config_in,
                      std::shared_ptr<INvStorage> storage_in) : TestUptaneClient(config_in, storage_in, std::make_shared<HttpClient>()) {}
+
 
     api::FlowControlToken* FlowControlToken() { return &flow_control_; }
    private:

@@ -11,14 +11,19 @@ set(SOURCES aktualizr.cc
 set(HEADERS aktualizr_helpers.h
             consent.h
             dbus.h
+            journal.h
             offline_logs_manager.h
+            online_logs_uploader.h
             provisioner.h
             reportqueue.h
             secondary_config.h
             secondary_install_job.h
             secondary_provider_builder.h
             sotauptaneclient.h
+            systemd_journal.h
+            test_journal.h
             update_lock_file.h)
+
 
 
 if (BUILD_DBUS)
@@ -32,10 +37,11 @@ else (BUILD_DBUS)
 endif(BUILD_DBUS)
 
 if (BUILD_OFFLINE_UPDATES)
-    list(APPEND SOURCES offline_logs_manager.cc)
+    list(APPEND SOURCES systemd_journal.cc offline_logs_manager.cc online_logs_uploader.cc)
 else (BUILD_OFFLINE_UPDATES)
-    aktualizr_source_file_checks(offline_logs_manager.cc)
+    aktualizr_source_file_checks(systemd_journal.cc offline_logs_manager.cc online_logs_uploader.cc)
 endif(BUILD_OFFLINE_UPDATES)
+
 
 add_library(primary OBJECT ${SOURCES})
 if (BUILD_DBUS)
@@ -182,7 +188,19 @@ add_aktualizr_test(NAME sotauptaneclient_offline
                    PROJECT_WORKING_DIRECTORY
                    LIBRARIES uptane_generator_lib virtual_secondary)
 
+add_aktualizr_test(NAME journal
+                   SOURCES journal_test.cc)
+
 add_aktualizr_test(NAME offline_logs_manager
                    SOURCES offline_logs_manager_test.cc)
 
+add_aktualizr_test(NAME online_logs_uploader
+                   SOURCES online_logs_uploader_test.cc)
+
+add_aktualizr_test(NAME online_logs
+                   SOURCES online_logs_test.cc
+                   PROJECT_WORKING_DIRECTORY
+                   LIBRARIES uptane_generator_lib virtual_secondary)
+
 aktualizr_source_file_checks(${SOURCES} ${HEADERS} ${TEST_SOURCES})
+

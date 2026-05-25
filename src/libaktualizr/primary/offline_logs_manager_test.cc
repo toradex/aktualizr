@@ -3,6 +3,7 @@
 #include <boost/filesystem.hpp>
 
 #include "primary/offline_logs_manager.h"
+#include "primary/test_journal.h"
 #include "storage/offline_logs_db.h"
 #include "utilities/utils.h"
 
@@ -37,7 +38,7 @@ TEST_F(OfflineLogsManagerTest, BeginInstallWorksWithSymlinkedParentDirectory) {
   ASSERT_TRUE(boost::filesystem::is_symlink(symlink_dir));
 
   // OfflineLogsManager should resolve the symlink and successfully create the database
-  OfflineLogsManager manager(config_);
+  OfflineLogsManager manager(config_, std::make_shared<TestJournal>());
   InstallId id = manager.BeginInstall(symlink_dir, "device-123", "test-update", 1);
 
   // Should succeed because ResolveLogsDbPath canonicalizes the path
@@ -65,7 +66,7 @@ TEST_F(OfflineLogsManagerTest, BeginInstallWorksWithDeeplyNestedSymlinks) {
   ASSERT_TRUE(boost::filesystem::is_symlink(symlink1));
   ASSERT_TRUE(boost::filesystem::is_symlink(symlink2));
 
-  OfflineLogsManager manager(config_);
+  OfflineLogsManager manager(config_, std::make_shared<TestJournal>());
   InstallId id = manager.BeginInstall(symlink1, "device-123", "test-update", 1);
 
   EXPECT_TRUE(id.IsValid()) << "BeginInstall should handle nested symlinks";
@@ -93,7 +94,7 @@ TEST_F(OfflineLogsManagerTest, BeginInstallFailsWhenDatabaseFileIsSymlink) {
 
   // OfflineLogsManager should fail because the final db file is a symlink
   // (SQLITE_OPEN_NOFOLLOW rejects this)
-  OfflineLogsManager manager(config_);
+  OfflineLogsManager manager(config_, std::make_shared<TestJournal>());
   InstallId id = manager.BeginInstall(update_dir, "device-123", "test-update", 1);
 
   EXPECT_FALSE(id.IsValid())
@@ -113,13 +114,13 @@ TEST_F(OfflineLogsManagerTest, FindAndResumeWorksWithSymlinkedParentDirectory) {
 
   // First create an install using the real path
   {
-    OfflineLogsManager manager(config_);
+    OfflineLogsManager manager(config_, std::make_shared<TestJournal>());
     InstallId id = manager.BeginInstall(real_update_dir, "device-123", "test-update", 1);
     ASSERT_TRUE(id.IsValid());
   }
 
   // Now try to resume using the symlinked path (simulates reboot with different mount)
-  OfflineLogsManager manager(config_);
+  OfflineLogsManager manager(config_, std::make_shared<TestJournal>());
   InstallId id = manager.FindAndResumeInstall(symlink_dir, "device-123");
 
   EXPECT_TRUE(id.IsValid()) << "FindAndResumeInstall should work when accessing via symlinked parent";

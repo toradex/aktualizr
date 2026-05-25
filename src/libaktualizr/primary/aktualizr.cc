@@ -512,11 +512,6 @@ std::future<void> Aktualizr::SendDeviceData(const Json::Value &hwinfo) {
   return api_queue_->enqueue(std::move(task));
 }
 
-std::future<void> Aktualizr::CompleteSecondaryUpdates() {
-  std::function<void()> task([this] { uptane_client_->completePreviousSecondaryUpdates(); });
-  return api_queue_->enqueue(std::move(task));
-}
-
 std::future<result::UpdateCheck> Aktualizr::CheckUpdates() {
   std::function<result::UpdateCheck()> task([this] { return uptane_client_->fetchMeta(); });
   return api_queue_->enqueue(std::move(task), result::UpdateCheck());

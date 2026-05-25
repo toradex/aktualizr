@@ -2,13 +2,11 @@
 #define PRIMARY_OFFLINE_LOGS_MANAGER_H_
 
 #include <boost/filesystem/path.hpp>
-#include <memory>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #include "libaktualizr/config.h"
-#include "storage/journal_copier.h"
+#include "primary/journal.h"
 #include "storage/offline_logs_db.h"
 
 class INvStorage;
@@ -27,9 +25,16 @@ class Manifest;
  */
 class OfflineLogsManager {
  public:
-  explicit OfflineLogsManager(const Config& config);
+  /**
+   * @param config Aktualizr configuration.
+   * @param journal_prototype Prototype journal handle, cloned via Clone() to
+   *        obtain a fresh handle for each install. Dependency injected so tests
+   *        can supply a TestJournal.
+   */
+  OfflineLogsManager(const Config& config, std::shared_ptr<JournalHandle> journal_prototype);
 
   // Non-copyable, non-movable
+
   OfflineLogsManager(const OfflineLogsManager&) = delete;
   OfflineLogsManager& operator=(const OfflineLogsManager&) = delete;
   OfflineLogsManager(OfflineLogsManager&&) = delete;
@@ -104,9 +109,11 @@ class OfflineLogsManager {
 
   bool enabled_;
   std::string logs_filename_;
-  std::vector<std::string> capture_services_;
-  std::unique_ptr<OfflineLogsDb> db_;
-  JournalCopier::Cursor journal_cursor_;
+  JournalFilter capture_services_;
+  std::shared_ptr<JournalHandle> journal_prototype_;
+  std::optional<OfflineLogsDb> db_;
+  // Points to the entry _before_ the next one we'll process
+  std::unique_ptr<JournalHandle> journal_handle_;
   InstallId current_install_id_;
 };
 
@@ -118,9 +125,10 @@ class OfflineLogsManager {
  */
 class OfflineLogsManager {
  public:
-  explicit OfflineLogsManager(const Config& /* config */) {}
+  OfflineLogsManager(const Config& /* config */, std::shared_ptr<JournalHandle> /* journal_prototype */) {}
 
   OfflineLogsManager(const OfflineLogsManager&) = delete;
+
   OfflineLogsManager& operator=(const OfflineLogsManager&) = delete;
   OfflineLogsManager(OfflineLogsManager&&) = delete;
   OfflineLogsManager& operator=(OfflineLogsManager&&) = delete;

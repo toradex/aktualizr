@@ -20,12 +20,11 @@ set(SOURCES fsstorage_read.cc
             sqlstorage_base.cc)
 
 if (BUILD_OFFLINE_UPDATES)
-    list(APPEND SOURCES offline_logs_db.cc journal_copier.cc)
-    list(APPEND HEADERS journal_copier.h)
+    list(APPEND SOURCES offline_logs_db.cc)
     add_aktualizr_test(NAME offline_logs_db SOURCES offline_logs_db_test.cc PROJECT_WORKING_DIRECTORY)
 
 else (BUILD_OFFLINE_UPDATES)
-    aktualizr_source_file_checks(offline_logs_db.cc offline_logs_db_test.cc journal_copier.cc journal_copier.h)
+    aktualizr_source_file_checks(offline_logs_db.cc offline_logs_db_test.cc)
 endif(BUILD_OFFLINE_UPDATES)
 
 

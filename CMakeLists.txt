@@ -169,7 +169,7 @@ endif(BUILD_SOTA_TOOLS)
 if(BUILD_DBUS OR BUILD_OFFLINE_UPDATES)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(SYSTEMD REQUIRED libsystemd>=233)
-endif(BUILD_DBUS)
+endif(BUILD_DBUS OR BUILD_OFFLINE_UPDATES)
 
 if(TORIZON)
     add_definitions(-DTORIZON)

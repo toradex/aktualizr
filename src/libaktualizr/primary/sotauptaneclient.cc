@@ -20,6 +20,10 @@
 #include "uptane/tuf.h"
 #include "utilities/utils.h"
 
+#ifdef BUILD_OFFLINE_UPDATES
+#include "primary/systemd_journal.h"
+#endif
+
 // Fields to ignore from image-repo custom metadata when merging it with the one from the director.
 static const std::vector<std::string> IMAGE_REPO_MERGE_IGNORE{"hardwareIds", "targetFormat", "uri"};
 
@@ -45,10 +49,27 @@ class TargetCompare {
   const Uptane::Target &target;
 };
 
+namespace {
+// Pick the journal prototype to use: if the caller injected one (typically a
+// TestJournal from a unit test) use that, otherwise fall back to the real
+// systemd-backed implementation when offline-updates support is compiled in.
+std::shared_ptr<JournalHandle> resolveJournalPrototype(std::shared_ptr<JournalHandle> injected) {
+  if (injected) {
+    return injected;
+  }
+#ifdef BUILD_OFFLINE_UPDATES
+  return std::make_shared<SystemdJournal>();
+#else
+  return nullptr;
+#endif
+}
+}  // namespace
+
 SotaUptaneClient::SotaUptaneClient(Config &config_in, std::shared_ptr<INvStorage> storage_in,
                                    std::shared_ptr<HttpInterface> http_in,
                                    std::shared_ptr<event::Channel> events_channel_in,
-                                   const api::FlowControlToken *flow_control)
+                                   const api::FlowControlToken *flow_control,
+                                   const std::shared_ptr<JournalHandle> &journal_prototype)
     : config(config_in),
       storage(std::move(storage_in)),
       http(std::move(http_in)),
@@ -58,7 +79,8 @@ SotaUptaneClient::SotaUptaneClient(Config &config_in, std::shared_ptr<INvStorage
       events_channel(std::move(events_channel_in)),
       provisioner_(config.provision, storage, http, key_manager_, secondaries),
       flow_control_(flow_control),
-      offline_logs_manager_(config_in) {
+      offline_logs_manager_(config_in, resolveJournalPrototype(journal_prototype)),
+      online_logs_uploader_(config_in, http, resolveJournalPrototype(journal_prototype)) {
   report_queue = std_::make_unique<ReportQueue>(config, http, storage);
   secondary_provider_ = SecondaryProviderBuilder::Build(config, storage, package_manager_, http);
 }
@@ -137,8 +159,6 @@ data::InstallationResult SotaUptaneClient::PackageInstall(const Uptane::Target &
 }
 
 void SotaUptaneClient::finalizeAfterReboot() {
-  // TODO: consider bringing checkAndUpdatePendingSecondaries and the following functionality
-  // to the common denominator
   if (!hasPendingUpdates()) {
     LOG_DEBUG << "No pending updates, continuing with initialization";
     return;
@@ -165,8 +185,26 @@ void SotaUptaneClient::finalizeAfterReboot() {
   Uptane::CorrelationId correlation_id;
   storage->loadInstalledVersions(primary_ecu_serial.ToString(), nullptr, &pending_target, &correlation_id);
 
+  // Resume online log streaming after reboot for online pending updates,
+  // mirroring the offline logs resume above. This is placed before
+  // completePreviousSecondaryUpdates() so that secondary completion logs
+  // are also captured. The End() will happen inside putManifestSimple()
+  // after the manifest is sent to the server.
+  if (!offline_update_path && !correlation_id.empty()) {
+    online_logs_uploader_.Begin(correlation_id);
+  }
+
+  // Complete any pending secondary installs before finalizing the primary.
+  // This must happen before putManifestSimple() so that secondary results
+  // are included in the manifest.
+  LOG_INFO << "The current update is pending. Check if secondaries have already been updated";
+  // TODO: [TORIZON] Maybe here we should determine what secondaries have pending updates and
+  // then wait for them to be online by doing something similar to `waitSecondariesReachable()`.
+  checkAndUpdatePendingSecondaries();
+
   if (!pending_target) {
     LOG_ERROR << "No pending update for Primary ECU found, continuing with initialization";
+    online_logs_uploader_.End();
     return;
   }
 
@@ -177,6 +215,7 @@ void SotaUptaneClient::finalizeAfterReboot() {
   if (install_res.result_code == data::ResultCode::Numeric::kNeedCompletion) {
     LOG_INFO << "Pending update for Primary ECU was not applied because reboot was not detected, "
                 "continuing with initialization";
+    online_logs_uploader_.End();
     return;
   }
 
@@ -448,7 +487,6 @@ void SotaUptaneClient::initialize() {
   uptane_manifest = std::make_shared<Uptane::ManifestIssuer>(key_manager_, provisioner_.PrimaryEcuSerial());
 
   startupCleanSecondaries();
-  completePreviousSecondaryUpdates();
 
   finalizeAfterReboot();
 
@@ -769,6 +807,12 @@ result::Download SotaUptaneClient::downloadImages(const std::vector<Uptane::Targ
     requiresAlreadyProvisioned();
   }
 
+  // Start online log streaming at the start of the download phase for online updates
+  if (utype == UpdateType::kOnline) {
+    auto correlation_id = director_repo.getCorrelationId();
+    online_logs_uploader_.Begin(correlation_id);
+  }
+
   // Begin offline logging at the start of the download phase for offline updates
   if (utype == UpdateType::kOffline && !offline_logs_manager_.HasActiveInstall()) {
     auto offline_update_path = storage->loadOfflineUpdatePath();
@@ -811,6 +855,9 @@ result::Download SotaUptaneClient::downloadImages(const std::vector<Uptane::Targ
   }
 
   if (update_status != result::UpdateStatus::kUpdatesAvailable) {
+    if (utype == UpdateType::kOnline) {
+      online_logs_uploader_.End();
+    }
     sendEvent<event::AllDownloadsComplete>(result);
     return result;
   }
@@ -1352,6 +1399,14 @@ result::Install SotaUptaneClient::uptaneInstall(const std::vector<Uptane::Target
     offline_logs_manager_.CaptureReports(*storage);
   }
 
+  // End online log streaming after install completes.
+  // For kNeedCompletion (reboot required), this flushes logs captured so far;
+  // streaming will resume in finalizeAfterReboot(). For other outcomes, this
+  // is the final flush — putManifestSimple() will End() again as a no-op.
+  if (utype == UpdateType::kOnline) {
+    online_logs_uploader_.End();
+  }
+
   sendEvent<event::AllInstallsComplete>(r);
 
   return r;
@@ -1412,15 +1467,6 @@ void SotaUptaneClient::completeInstall() {
   }
 }
 
-void SotaUptaneClient::completePreviousSecondaryUpdates() {
-  if (hasPendingUpdates()) {
-    LOG_INFO << "The current update is pending. Check if secondaries have already been updated";
-    // TODO: [TORIZON] Maybe here we should determine what secondaries have pending updates and
-    // then wait for them to be online by doing something similar to `waitSecondariesReachable()`.
-    checkAndUpdatePendingSecondaries();
-  }
-}
-
 result::PutManifestResult SotaUptaneClient::putManifestSimple(const Json::Value &custom) {
   using result::PutManifestStatus;
   // does not send event, so it can be used as a subset of other steps
@@ -1456,6 +1502,11 @@ result::PutManifestResult SotaUptaneClient::putManifestSimple(const Json::Value 
   }
 
   HttpResponse response = http->put(config.uptane.director_server + "/manifest", signed_manifest);
+
+  // End online log streaming regardless of manifest PUT outcome.
+  // The logs have been captured; keeping the thread alive serves no purpose.
+  online_logs_uploader_.End();
+
   if (!response.isOk()) {
     connected_ = false;
     LOG_WARNING << "Put manifest request failed: " << response.getStatusStr();
