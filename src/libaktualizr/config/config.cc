@@ -230,12 +230,16 @@ void Config::updateFromTomlString(const std::string& contents) {
 
 void Config::updateFromPropertyTree(const boost::property_tree::ptree& pt) {
   // Keep this order the same as in config.h and Config::writeToStream().
-  if (!loglevel_from_cmdline) {
-    CopySubtreeFromConfig(logger, "logger", pt);
-    // If not already set from the commandline, set the loglevel now so that it
-    // affects the rest of the config processing.
-    logger_set_threshold(logger);
+  // Always parse the [logger] subtree so that fields like capture_services and
+  // online_logs_enabled are honored; only the loglevel itself is overridden by
+  // the command line when provided.
+  const int cmdline_loglevel = logger.loglevel;
+  CopySubtreeFromConfig(logger, "logger", pt);
+  if (loglevel_from_cmdline) {
+    logger.loglevel = cmdline_loglevel;
   }
+  // Set the loglevel now so that it affects the rest of the config processing.
+  logger_set_threshold(logger);
   CopySubtreeFromConfig(p11, "p11", pt);
   CopySubtreeFromConfig(tls, "tls", pt);
   CopySubtreeFromConfig(provision, "provision", pt);
