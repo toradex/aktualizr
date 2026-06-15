@@ -49,7 +49,7 @@ add_test(NAME aktualizr-option-help
 # Report version.
 add_test(NAME aktualizr-option-version
          COMMAND aktualizr --version)
-set_tests_properties(aktualizr-option-version PROPERTIES PASS_REGULAR_EXPRESSION "Current aktualizr version is: ${AKTUALIZR_VERSION}")
+set_tests_properties(aktualizr-option-version PROPERTIES PASS_REGULAR_EXPRESSION "Current aktualizr(-torizon)? version is: ${AKTUALIZR_VERSION}")
 
 aktualizr_source_file_checks(${SOURCES} ${HEADERS} ${TEST_SOURCES})
 

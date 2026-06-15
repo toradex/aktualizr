@@ -165,12 +165,12 @@ set_tests_properties(test-no-config-check-message
 add_test(NAME test-help-with-other-options
          COMMAND aktualizr --help -c someconfig.toml)
 set_tests_properties(test-help-with-other-options
-                     PROPERTIES PASS_REGULAR_EXPRESSION "aktualizr command line options")
+                     PROPERTIES PASS_REGULAR_EXPRESSION "aktualizr(-torizon)? command line options")
 
 add_test(NAME test-help-with-nonexistent-options
          COMMAND aktualizr --help -somebadoption)
 set_tests_properties(test-help-with-nonexistent-options
-                     PROPERTIES PASS_REGULAR_EXPRESSION "aktualizr command line options")
+                     PROPERTIES PASS_REGULAR_EXPRESSION "aktualizr(-torizon)? command line options")
 
 # run `aktualizr check` for these tests, as they can run forever if a global
 # configuration is present
