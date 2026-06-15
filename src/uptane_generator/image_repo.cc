@@ -240,4 +240,27 @@ void ImageRepo::exportToLockBox(const boost::filesystem::path &lockbox_path) {
       }
     }
   }
+
+  // Copy all target image files to the lockbox's images/ directory. The
+  // offline update fetcher (OfflineUpdateFetcher) reads images from
+  // <lockbox_path>/images/<filename>, so we need to lay out the binary files
+  // under that path. Targets are stored in the image repo under
+  // <repo_dir>/targets/<targetname>; we mirror that path component under
+  // <lockbox_path>/images/.
+  const boost::filesystem::path targets_dir = repo_dir / "targets";
+  if (boost::filesystem::exists(targets_dir) && boost::filesystem::is_directory(targets_dir)) {
+    const boost::filesystem::path lockbox_images_dir = lockbox_path / "images";
+    boost::filesystem::create_directories(lockbox_images_dir);
+
+    for (auto &entry : boost::filesystem::recursive_directory_iterator(targets_dir)) {
+      if (!boost::filesystem::is_regular_file(entry)) {
+        continue;
+      }
+      // Compute the path relative to targets_dir and append it to images/.
+      auto rel = boost::filesystem::relative(entry.path(), targets_dir);
+      boost::filesystem::path dest = lockbox_images_dir / rel;
+      boost::filesystem::create_directories(dest.parent_path());
+      boost::filesystem::copy_file(entry.path(), dest, boost::filesystem::copy_options::overwrite_existing);
+    }
+  }
 }

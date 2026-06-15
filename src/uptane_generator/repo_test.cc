@@ -701,7 +701,8 @@ void CheckExpectedFilesMatch(const fs::path &root, std::vector<ExpectedFile> exp
 }  // namespace
 
 /*
- * Export a basic lockbox and verify it contains Image repository metadata.
+ * Export a basic lockbox and verify it contains Image repository metadata
+ * and the binary image files referenced by the targets.
  */
 TEST(uptane_generator, exportLockBoxSimple) {
   TemporaryDirectory temp_dir;
@@ -710,14 +711,17 @@ TEST(uptane_generator, exportLockBoxSimple) {
   UptaneRepo repo(temp_dir.Path(), "2029-07-04T16:33:27Z", "test-correlation-id");
   repo.generateRepo(key_type);
 
-  // Add a test image
-  auto firmware_path = temp_dir.Path() / "targets" / "test_firmware.bin";
+  // Add a test image with known contents so we can verify the bytes survive
+  // the round-trip into the lockbox.
+  const std::string image_filename = "test_firmware.bin";
+  const std::string image_content = "test firmware content for exportLockBoxSimple";
+  auto firmware_path = temp_dir.Path() / "targets" / image_filename;
   boost::filesystem::create_directories(firmware_path.parent_path());
-  Utils::writeFile(firmware_path, std::string("test firmware content"));
-  repo.addImage(firmware_path, "test_firmware.bin", "test_hw");
+  Utils::writeFile(firmware_path, image_content);
+  repo.addImage(firmware_path, image_filename, "test_hw");
 
   // Add offline update target
-  repo.addOfflineUpdateTarget("test_firmware.bin", "test_hw", "test_lockbox", "2029-06-01T00:00:00Z");
+  repo.addOfflineUpdateTarget(image_filename, "test_hw", "test_lockbox", "2029-06-01T00:00:00Z");
   repo.signOfflineTargets("test_lockbox");
 
   // Export lockbox
@@ -739,8 +743,17 @@ TEST(uptane_generator, exportLockBoxSimple) {
 
   // Verify Image repo targets contains our image
   auto image_targets_json = Utils::parseJSON(Utils::readFile(lockbox_dir / "metadata" / "image-repo" / "targets.json"));
-  EXPECT_TRUE(image_targets_json["signed"]["targets"].isMember("test_firmware.bin"));
-  EXPECT_EQ(image_targets_json["signed"]["targets"]["test_firmware.bin"]["length"].asUInt(), 21);
+  EXPECT_TRUE(image_targets_json["signed"]["targets"].isMember(image_filename));
+  EXPECT_EQ(image_targets_json["signed"]["targets"][image_filename]["length"].asUInt(), image_content.size());
+
+  // The lockbox's images/ directory should now contain the actual binary,
+  // matching the layout that the offline update fetcher expects
+  // (OfflineUpdateFetcher::getImagesPath() / target.filename()).
+  auto image_in_lockbox = lockbox_dir / "images" / image_filename;
+  EXPECT_TRUE(boost::filesystem::exists(image_in_lockbox))
+      << "Image binary should be exported to lockbox at " << image_in_lockbox;
+  EXPECT_EQ(Utils::readFile(image_in_lockbox), image_content)
+      << "Image binary in lockbox should match the bytes of the source image";
 }
 
 /*
