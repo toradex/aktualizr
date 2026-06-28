@@ -43,7 +43,10 @@ class HttpClient : public HttpInterface {
   HttpResponse download(const std::string &url, curl_write_callback write_cb, curl_xferinfo_callback progress_cb,
                         void *userp, curl_off_t from) override;
 
-  /** Note it is the responsibility of the caller to keep url alive and unmodified unit the returned future resolves. */
+  /**
+   * Note it is the responsibility of the caller to keep url alive and
+   * unmodified until the returned future resolves.
+   */
   std::future<HttpResponse> downloadAsync(const std::string &url, curl_write_callback write_cb,
                                           curl_xferinfo_callback progress_cb, void *userp, curl_off_t from) override;
   void setCerts(const std::string &ca, CryptoSource ca_source, const std::string &cert, CryptoSource cert_source,

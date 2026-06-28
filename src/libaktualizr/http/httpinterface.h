@@ -60,7 +60,8 @@ class HttpInterface {
    *
    * @warning This method mutates shared state and is serialised with the
    * internal mutex. However, it should only be called during provisioning
-   * (before concurrent HTTP requests begin) race conditions.
+   * (before concurrent HTTP requests begin) to avoid race conditions with
+   * fetches over HTTP (get(), post(), put() etc).
    */
   virtual void setCerts(const std::string &ca, CryptoSource ca_source, const std::string &cert,
                         CryptoSource cert_source, const std::string &pkey, CryptoSource pkey_source) = 0;

@@ -187,7 +187,7 @@ void SotaUptaneClient::finalizeAfterReboot() {
 
   // Resume online log streaming after reboot for online pending updates,
   // mirroring the offline logs resume above. This is placed before
-  // completePreviousSecondaryUpdates() so that secondary completion logs
+  // checkAndUpdatePendingSecondaries() so that secondary completion logs
   // are also captured. The End() will happen inside putManifestSimple()
   // after the manifest is sent to the server.
   if (!offline_update_path && !correlation_id.empty()) {
