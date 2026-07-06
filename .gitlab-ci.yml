@@ -107,9 +107,6 @@ test-bullseye-p11:
     TEST_SCRIPT: source/scripts/build-and-test-bullseye.sh
     # TODO: Fix the errors with these tests.
     TEST_BLACKLIST: >-
-      aktualizr-option-version
-      test-help-with-nonexistent-options
-      test-help-with-other-options
       test_aktualizr
       test_aktualizr_update_lock
       test_c_api
