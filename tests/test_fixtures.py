@@ -8,6 +8,7 @@ import shutil
 import signal
 import socket
 import time
+from urllib.parse import urlsplit
 
 from io import BytesIO
 from os import path, urandom
@@ -448,15 +449,15 @@ class UptaneRepo(HTTPServer):
         self._server_thread = None
 
         self.Handler.do_POST = \
-            lambda request: (self.Handler.handler_map.get('POST', {})).get(request.path,
+            lambda request: (self.Handler.handler_map.get('POST', {})).get(urlsplit(request.path).path,
                                                                            self.Handler.default_handler)(request)
 
         self.Handler.do_PUT = \
-            lambda request: (self.Handler.handler_map.get('PUT', {})).get(request.path,
+            lambda request: (self.Handler.handler_map.get('PUT', {})).get(urlsplit(request.path).path,
                                                                           self.Handler.default_handler)(request)
 
         self.Handler.do_GET = \
-            lambda request: (self.Handler.handler_map.get('GET', {})).get(request.path,
+            lambda request: (self.Handler.handler_map.get('GET', {})).get(urlsplit(request.path).path,
                                                                           self.Handler.default_get)(request)
 
         for method, method_handlers in client_handler_map.items():

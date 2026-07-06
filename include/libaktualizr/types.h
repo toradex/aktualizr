@@ -42,6 +42,22 @@ enum class InstallUpdatesAutomatically {
   kLast = kAsk
 };
 
+/** What was the trigger for checking for updates */
+enum class CheckReason {
+  /** Unknown reason */
+  kUnknown,
+  /** Aktualizr Startup */
+  kServiceStart,
+  /** Time-based polling */
+  kPoll,
+  /** Shoulder-tap over DBus */
+  kDbusWake,
+  /** Sending a manifest after an update */
+  kPostUpdate,
+  kLast = kPostUpdate,
+};
+std::ostream &operator<<(std::ostream &os, CheckReason check_reason);
+
 namespace utils {
 /**
  * @brief The BasedPath class

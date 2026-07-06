@@ -118,6 +118,8 @@ TEST(Aktualizr, FullNoUpdates) {
   }
 
   verifyNothingInstalled(aktualizr.uptane_client()->AssembleManifest());
+
+  EXPECT_EQ(http->put_urls().back(), "/director/manifest?reason=poll");
 }
 
 /*

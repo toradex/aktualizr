@@ -83,7 +83,7 @@ class SotaUptaneClient {
   void reportAwaitingConsent();
   void reportConsentOutcome(const Consent::Outcome &consent_outcome);
   void sendDeviceData();
-  result::UpdateCheck fetchMeta();
+  result::UpdateCheck fetchMeta(CheckReason check_reason = CheckReason::kUnknown);
   result::PutManifestResult putManifest(const Json::Value &custom = Json::nullValue);
   result::Install uptaneInstall(const std::vector<Uptane::Target> &updates, UpdateType utype = UpdateType::kOnline);
   result::CampaignCheck campaignCheck();
@@ -188,7 +188,8 @@ class SotaUptaneClient {
   void sendMetadataToEcus(const std::vector<Uptane::Target> &targets, data::InstallationResult *result,
                           std::string *raw_installation_report, UpdateType utype);
 
-  result::PutManifestResult putManifestSimple(const Json::Value &custom = Json::nullValue);
+  result::PutManifestResult putManifestSimple(const Json::Value &custom = Json::nullValue,
+                                              CheckReason = CheckReason::kUnknown);
   void getNewTargets(std::vector<Uptane::Target> *new_targets, unsigned int *ecus_count = nullptr);
   void updateDirectorMeta(UpdateType utype = UpdateType::kOnline);
   void updateImageMeta(UpdateType utype = UpdateType::kOnline);

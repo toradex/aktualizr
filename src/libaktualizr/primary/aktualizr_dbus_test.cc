@@ -146,6 +146,8 @@ TEST_F(AktualizrDbus, CheckForUpdates) {
 
   aktualizr.Shutdown();
   ak_future.wait();
+
+  EXPECT_EQ(http->put_urls().back(), "/director/manifest?reason=dbus-wake");
 }
 
 namespace {

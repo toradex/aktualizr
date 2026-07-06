@@ -39,7 +39,7 @@ class Handler(BaseHTTPRequestHandler):
         data = json.loads(self.rfile.read(length).decode('utf-8'))
         if self.path == "/director/ecus":
             return self.do_ecuRegister(data)
-        elif self.path == "/director/manifest":
+        elif self.path.startswith("/director/manifest"):
             return self.do_manifest(data)
         else:
             self.send_response(404)

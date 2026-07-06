@@ -53,6 +53,32 @@ std::ostream &operator<<(std::ostream &os, VerificationType vtype) {
   return os;
 }
 
+std::ostream &operator<<(std::ostream &os, CheckReason check_reason) {
+  // Note that these names form a contract with the server: they appear in
+  // PUT manifest?reason=... URLs. Don't change existing strings.
+  switch (check_reason) {
+    case CheckReason::kPoll:
+      os << "poll";
+      break;
+    case CheckReason::kDbusWake:
+      os << "dbus-wake";
+      break;
+    case CheckReason::kPostUpdate:
+      os << "post-update";
+      break;
+    case CheckReason::kServiceStart:
+      os << "service-start";
+      break;
+    case CheckReason::kUnknown:
+      os << "unknown";
+      break;
+    default:
+      os << "invalid(" << static_cast<int>(check_reason) << ")";
+      break;
+  }
+  return os;
+}
+
 std::ostream &operator<<(std::ostream &os, UpdateType utype) {
   std::string utype_str = Uptane::UpdateTypeToString(utype);
   os << '"' << utype_str << '"';

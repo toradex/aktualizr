@@ -1,8 +1,10 @@
+#include <sstream>
+
 #include <gtest/gtest.h>
 
 #include "libaktualizr/types.h"
 
-TimeStamp now("2017-01-01T01:00:00Z");
+const TimeStamp now("2017-01-01T01:00:00Z");
 
 /* Parse Uptane timestamps. */
 TEST(Types, TimeStampParsing) {
@@ -252,6 +254,18 @@ TEST(Types, MergeJsonRealCaseIgnore) {
   EXPECT_EQ(res1["targetFormat"].type(), Json::nullValue);
   EXPECT_EQ(res1["createdAt"], "2022-06-22T14:52:11Z");
   EXPECT_EQ(res1["updatedAt"], "2022-06-22T15:09:09Z");
+}
+
+TEST(Types, CheckReasonOstream) {
+  std::stringstream ss;
+  const int last_value = static_cast<int>(CheckReason::kLast);
+  for (int i = 0; i <= last_value; i++) {
+    ss << static_cast<CheckReason>(i);
+    EXPECT_EQ(ss.str().find("invalid"), std::string::npos) << "Missing operator<< for CheckReason for value " << i;
+    ss.str("");
+  }
+  ss << static_cast<CheckReason>(last_value + 1);
+  EXPECT_NE(ss.str().find("invalid"), std::string::npos) << "Test for missing operation << broken";
 }
 
 #ifndef __NO_MAIN__

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <fstream>
 #include <memory>
+#include <sstream>
 #include <utility>
 
 #include "crypto/crypto.h"
@@ -239,7 +240,7 @@ void SotaUptaneClient::finalizeAfterReboot() {
   std::string raw_report;
   computeDeviceInstallationResult(&ir, &raw_report);
   storage->storeDeviceInstallationResult(ir, raw_report, correlation_id);
-  putManifestSimple();
+  putManifestSimple(Json::nullValue, CheckReason::kPostUpdate);
 }
 
 data::InstallationResult SotaUptaneClient::PackageInstallSetResult(const Uptane::Target &target,
@@ -1062,7 +1063,7 @@ void SotaUptaneClient::sendDeviceData() {
   sendEvent<event::SendDeviceDataComplete>();
 }
 
-result::UpdateCheck SotaUptaneClient::fetchMeta() {
+result::UpdateCheck SotaUptaneClient::fetchMeta(CheckReason check_reason) {
   requiresProvision();
 
   reportNetworkInfo();
@@ -1081,7 +1082,7 @@ result::UpdateCheck SotaUptaneClient::fetchMeta() {
   }
 
   // Uptane step 1 (build the vehicle version manifest):
-  if (!putManifestSimple().success()) {
+  if (!putManifestSimple(Json::nullValue, check_reason).success()) {
     LOG_ERROR << "Error sending manifest!";
   }
   auto result = checkUpdates();
@@ -1467,7 +1468,7 @@ void SotaUptaneClient::completeInstall() {
   }
 }
 
-result::PutManifestResult SotaUptaneClient::putManifestSimple(const Json::Value &custom) {
+result::PutManifestResult SotaUptaneClient::putManifestSimple(const Json::Value &custom, CheckReason check_reason) {
   using result::PutManifestStatus;
   // does not send event, so it can be used as a subset of other steps
   if (hasPendingUpdates()) {
@@ -1501,7 +1502,11 @@ result::PutManifestResult SotaUptaneClient::putManifestSimple(const Json::Value 
     LOG_INFO << "Offline logging completed and update path cleared";
   }
 
-  HttpResponse response = http->put(config.uptane.director_server + "/manifest", signed_manifest);
+  std::stringstream url;
+  url << config.uptane.director_server;
+  url << "/manifest";
+  url << "?reason=" << check_reason;
+  HttpResponse response = http->put(url.str(), signed_manifest);
 
   // End online log streaming regardless of manifest PUT outcome.
   // The logs have been captured; keeping the thread alive serves no purpose.

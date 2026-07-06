@@ -242,7 +242,8 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
             state_ = UpdateCycleState::kIdle;
             break;
           }
-          op_update_check_ = CheckUpdates();
+          op_update_check_ = CheckUpdates(next_check_reason_);
+          next_check_reason_ = CheckReason::kPoll;
           state_ = UpdateCycleState::kCheckingForUpdates;
         } else {
           // Idle
@@ -257,6 +258,7 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
           if (exit_cond_.check_for_updates_now) {
             LOG_INFO << "CheckForUpdates woke Aktualizr thread";
             exit_cond_.check_for_updates_now = false;
+            next_check_reason_ = CheckReason::kDbusWake;
             next_online_poll_ = now;
           } else if (!exit_cond_.check_for_offline_updates.empty()) {
             LOG_INFO << "Offline Update woke Aktualizr thread";
@@ -512,8 +514,8 @@ std::future<void> Aktualizr::SendDeviceData(const Json::Value &hwinfo) {
   return api_queue_->enqueue(std::move(task));
 }
 
-std::future<result::UpdateCheck> Aktualizr::CheckUpdates() {
-  std::function<result::UpdateCheck()> task([this] { return uptane_client_->fetchMeta(); });
+std::future<result::UpdateCheck> Aktualizr::CheckUpdates(CheckReason check_reason) {
+  std::function<result::UpdateCheck()> task([this, check_reason] { return uptane_client_->fetchMeta(check_reason); });
   return api_queue_->enqueue(std::move(task), result::UpdateCheck());
 }
 

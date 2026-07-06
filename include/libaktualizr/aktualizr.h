@@ -153,7 +153,7 @@ class Aktualizr {
    * @throw std::system_error (failure to lock a mutex)
    * @throw SotaUptaneClient::ProvisioningFailed (on-line provisioning failed)
    */
-  std::future<result::UpdateCheck> CheckUpdates();
+  std::future<result::UpdateCheck> CheckUpdates(CheckReason check_reason = CheckReason::kUnknown);
 
   /**
    * Download targets.
@@ -473,6 +473,7 @@ class Aktualizr {
   using Clock = std::chrono::steady_clock;
   Clock::time_point next_online_poll_;
   Clock::time_point next_offline_poll_;
+  CheckReason next_check_reason_{CheckReason::kServiceStart};
   result::UpdateCheck update_result_;
   // Make sure this is declared before SotaUptaneClient to prevent Valgrind
   // complaints with destructors.

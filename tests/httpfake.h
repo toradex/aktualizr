@@ -1,6 +1,7 @@
 #ifndef HTTPFAKE_H_
 #define HTTPFAKE_H_
 
+#include <gtest/gtest.h>
 #include <boost/filesystem/path.hpp>
 #include <string>
 #include <vector>
@@ -64,11 +65,13 @@ class HttpFake : public HttpInterface {
     (void)url;
     (void)content_type;
     (void)data;
+    register_put(url);
     return HttpResponse({}, 200, CURLE_OK, "");
   }
 
   HttpResponse put(const std::string &url, const Json::Value &data) override {
     last_manifest = data;
+    register_put(url);
     return HttpResponse(url, 200, CURLE_OK, "");
   }
 
@@ -81,16 +84,22 @@ class HttpFake : public HttpInterface {
   }
 
   std::vector<std::string> report_events() const { return report_events_; }
+  std::vector<std::string> put_urls() const { return put_urls_; }
 
   const std::string tls_server = "https://tlsserver.com";
   Json::Value last_manifest;
 
  protected:
+  void register_put(const std::string &url) {
+    EXPECT_EQ(url.find("reason=invalid"), std::string::npos);
+    put_urls_.push_back(url.substr(tls_server.size()));
+  }
   boost::filesystem::path test_dir;
   std::string flavor_;
   boost::filesystem::path meta_dir;
   TemporaryDirectory temp_meta_dir;
   std::vector<std::string> report_events_;
+  std::vector<std::string> put_urls_;
 };
 
 #endif  // HTTPFAKE_H_

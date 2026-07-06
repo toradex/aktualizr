@@ -8,6 +8,7 @@ import os
 import sys
 import socket
 import socketserver
+from urllib.parse import urlsplit, parse_qs
 
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 from os import path
@@ -34,6 +35,10 @@ class FailInjector:
 
 
 class Handler(SimpleHTTPRequestHandler):
+    def _split_request(self):
+        parts = urlsplit(self.path)
+        return parts.path, parse_qs(parts.query)
+
     def _serve_simple(self, uri):
         with open(uri, 'rb') as source:
             while True:
@@ -61,25 +66,26 @@ class Handler(SimpleHTTPRequestHandler):
         self._serve_simple(self.server.target_path + filename)
 
     def do_GET(self):
-        if self.path.startswith("/director/") and self.path.endswith(".json"):
-            role = self.path[len("/director/"):]
+        request_path, _ = self._split_request()
+        if request_path.startswith("/director/") and request_path.endswith(".json"):
+            role = request_path[len("/director/"):]
             self.serve_meta("/repo/director/" + role)
-        elif self.path.startswith("/repo/") and self.path.endswith(".json"):
-            role = self.path[len("/repo/"):]
+        elif request_path.startswith("/repo/") and request_path.endswith(".json"):
+            role = request_path[len("/repo/"):]
             self.serve_meta('/repo/repo/' + role)
-        elif self.path.startswith("/repo/targets"):
-            filename = self.path[len("/repo/targets"):]
+        elif request_path.startswith("/repo/targets"):
+            filename = request_path[len("/repo/targets"):]
             self.serve_target(filename)
 
-        elif self.path == '/download':
+        elif request_path == '/download':
             self.send_response(301)
             self.send_header('Location', '/download/file')
             self.end_headers()
-        elif self.path == '/download/file':
+        elif request_path == '/download/file':
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b'content')
-        elif self.path == '/auth_call':
+        elif request_path == '/auth_call':
             self.send_response(200)
             self.end_headers()
             if 'Authorization' in self.headers:
@@ -87,7 +93,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if auth_list[0] == 'Bearer' and auth_list[1] == 'token':
                     self.wfile.write(b'{"status": "good"}')
             self.wfile.write(b'{}')
-        elif self.path.endswith('/large_file'):
+        elif request_path.endswith('/large_file'):
             chunk_size = 1 << 20
             response_size = 100 * chunk_size
             if "Range" in self.headers:
@@ -110,15 +116,15 @@ class Handler(SimpleHTTPRequestHandler):
                 self.wfile.write(b'@' * last_chunk)
             except ConnectionResetError:
                 return
-        elif self.path == '/slow_file':
+        elif request_path == '/slow_file':
             self.send_response(200)
             self.end_headers()
             for i in range(10):
                 self.wfile.write(b'aa')
                 sleep(1)
-        elif self.path == '/campaigner/campaigns':
+        elif request_path == '/campaigner/campaigns':
             self.serve_meta("/campaigns.json")
-        elif self.path == '/user_agent':
+        elif request_path == '/user_agent':
             user_agent = self.headers.get('user-agent')
             self.send_response(200)
             self.end_headers()
@@ -134,7 +140,8 @@ class Handler(SimpleHTTPRequestHandler):
         if self.server.fail_injector is not None and self.server.fail_injector.fail(self):
             return
 
-        if self.path == '/devices':
+        request_path, _ = self._split_request()
+        if request_path == '/devices':
             self.send_response(200)
             self.end_headers()
             with open(path.join(self.server.srcdir, 'tests/test_data/cred.p12'), 'rb') as source:
@@ -144,13 +151,13 @@ class Handler(SimpleHTTPRequestHandler):
                         break
                     self.wfile.write(data)
 
-        elif self.path == "/director/ecus":
+        elif request_path == "/director/ecus":
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"{}")
             return
 
-        elif self.path == "/director/manifest":
+        elif request_path == "/director/manifest":
             content_length = int(self.headers['Content-Length'])  # <--- Gets the size of data
             post_data = self.rfile.read(content_length)  # <--- Gets the data itself
             print(post_data)  # <-- Print post data
@@ -159,7 +166,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.wfile.write(b"{}")
             return
 
-        elif self.path == '/token':
+        elif request_path == '/token':
             self.send_response(200)
             self.end_headers()
             if 'Authorization' in self.headers:
