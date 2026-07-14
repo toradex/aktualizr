@@ -221,6 +221,16 @@ bool Target::MatchTarget(const Target &t2) const {
     } else if (t2.ecus_.empty() && !ecus_.empty()) {
       ecu_map = std::make_shared<EcuMap>(ecus_);
       hwid_vector = std::make_shared<std::vector<HardwareIdentifier>>(t2.hwids_);
+    } else if (!ecus_.empty() && !t2.ecus_.empty() && hwids_.empty() && !t2.hwids_.empty()) {
+      // T1 is an online target and T2 is an offline target
+      // t2.ecus_ gets populated by DirectorRepository::transformOfflineTargets()
+      ecu_map = std::make_shared<EcuMap>(ecus_);
+      hwid_vector = std::make_shared<std::vector<HardwareIdentifier>>(t2.hwids_);
+    } else if (!ecus_.empty() && !t2.ecus_.empty() && !hwids_.empty() && t2.hwids_.empty()) {
+      // T1 is an offline target and T2 is an online target
+      // ecus_ gets populated by DirectorRepository::transformOfflineTargets()
+      ecu_map = std::make_shared<EcuMap>(t2.ecus_);
+      hwid_vector = std::make_shared<std::vector<HardwareIdentifier>>(hwids_);
     } else {
       return false;
     }
