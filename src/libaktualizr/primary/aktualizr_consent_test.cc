@@ -49,6 +49,10 @@ class HttpFakePeek : public HttpFake {
         peek_requests_++;
       } else {
         commit_requests_++;
+        if (fail_next_commits_ > 0) {
+          fail_next_commits_--;
+          return HttpResponse({}, 503, CURLE_OK, "");
+        }
       }
     }
     return HttpFake::get(url, maxsize, flow_control, extra_headers);
@@ -57,9 +61,13 @@ class HttpFakePeek : public HttpFake {
   int peek_requests() const { return peek_requests_; }
   int commit_requests() const { return commit_requests_; }
 
+  /** Next N non-peek director targets fetches return 503 (transient). */
+  void FailNextCommits(int n) { fail_next_commits_ = n; }
+
  private:
   std::atomic<int> peek_requests_{0};
   std::atomic<int> commit_requests_{0};
+  std::atomic<int> fail_next_commits_{0};
 };
 
 /**
@@ -562,6 +570,93 @@ TEST_F(AktualizrConsent, WithdrawnOfferCancelsConsent) {  // NOLINT
   EXPECT_EQ(CountEvents(http->report_events(), "ConsentOutcome"), 0)
       << "No ConsentOutcome for an offer the user never decided on";
   EXPECT_EQ(consent_ptr->GetConsentCalls(), 1) << "No re-prompt after withdrawal";
+
+  dut.Shutdown();
+  fut.wait();
+}
+
+/**
+ * After consent is granted, a transient network error on the commit fetch must
+ * not burn the campaign: the device retries and proceeds once connectivity
+ * recovers. This mirrors a user answering Consent while the device is offline.
+ */
+TEST_F(AktualizrConsent, TransientCommitFailureRetriesAndProceeds) {  // NOLINT
+  auto http = std::make_shared<HttpFakePeek>(temp_dir_.Path(), "", uptane_metadata_dir_ / "repo");
+  auto conf = UptaneTestCommon::makeTestConfig(temp_dir_, http->tls_server);
+  conf.uptane.polling_sec = 1;
+  auto storage = INvStorage::newStorage(conf.storage);
+  storage->storeInstallUpdatesAutomatically(InstallUpdatesAutomatically::kAsk);
+  UptaneTestCommon::TestAktualizr dut(conf, storage, http);
+
+  auto consent = std::make_unique<PendingConsent>();
+  auto *consent_ptr = consent.get();
+  dut.SetConsent(std::move(consent));
+  dut.Initialize();
+  auto fut = dut.RunForever();
+
+  ASSERT_TRUE(consent_ptr->WaitForGetConsentCalls(1, std::chrono::seconds(30)));
+  http->FailNextCommits(2);
+  consent_ptr->Respond(true, "granted while offline");
+
+  ASSERT_TRUE(WaitFor([&] { return http->commit_requests() >= 3; }, std::chrono::seconds(30)))
+      << "Should retry the commit fetch after transient failures";
+  ASSERT_TRUE(
+      WaitFor([&] { return CountEvents(http->report_events(), "EcuDownloadStarted") >= 1; }, std::chrono::seconds(30)))
+      << "Should proceed to download once a commit fetch succeeds";
+
+  data::InstallationResult ir;
+  std::string report;
+  std::string correlation_id;
+  EXPECT_FALSE(storage->loadDeviceInstallationResult(&ir, &report, &correlation_id))
+      << "Transient commit failures must not store an installation failure";
+
+  dut.Shutdown();
+  fut.wait();
+}
+
+/**
+ * If the server's offer changes between the consented peek and the commit
+ * fetch (without a superseding peek having updated the prompt), that is a
+ * permanent failure for the consented campaign — not a transient retry.
+ */
+TEST_F(AktualizrConsent, CorrelationMismatchAfterConsentFailsPermanently) {  // NOLINT
+  auto http = std::make_shared<HttpFakePeek>(temp_dir_.Path(), "", uptane_metadata_dir_ / "repo");
+  auto conf = UptaneTestCommon::makeTestConfig(temp_dir_, http->tls_server);
+  // Long poll so no peek runs between superseding on disk and the grant.
+  conf.uptane.polling_sec = 600;
+  auto storage = INvStorage::newStorage(conf.storage);
+  storage->storeInstallUpdatesAutomatically(InstallUpdatesAutomatically::kAsk);
+  UptaneTestCommon::TestAktualizr dut(conf, storage, http);
+
+  auto consent = std::make_unique<PendingConsent>();
+  auto *consent_ptr = consent.get();
+  dut.SetConsent(std::move(consent));
+  dut.Initialize();
+  auto fut = dut.RunForever();
+
+  ASSERT_TRUE(consent_ptr->WaitForGetConsentCalls(1, std::chrono::seconds(30)));
+  EXPECT_EQ(consent_ptr->CurrentCorrelationId(), "id0");
+
+  SupersedeUpdate("id1");
+  consent_ptr->Respond(true, "granted stale offer");
+
+  ASSERT_TRUE(WaitFor([&] { return http->commit_requests() >= 1; }, std::chrono::seconds(30)))
+      << "Commit fetch should run after consent";
+  // SendManifest clears the stored failure after uploading it; observe the
+  // failure via the manifest PUT rather than racing the DB clear.
+  ASSERT_TRUE(WaitFor(
+      [&] {
+        return http->last_manifest.isMember("signed") &&
+               http->last_manifest["signed"].isMember("installation_report") &&
+               http->last_manifest["signed"]["installation_report"]["report"]["correlation_id"].asString() == "id0";
+      },
+      std::chrono::seconds(30)))
+      << "Correlation mismatch should send a failure manifest for the consented ID";
+
+  // Give any mistaken retry path a moment; a permanent failure must not keep committing.
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+  EXPECT_EQ(http->commit_requests(), 1) << "Permanent mismatch must not retry the commit fetch";
+  EXPECT_EQ(CountEvents(http->report_events(), "EcuDownloadStarted"), 0);
 
   dut.Shutdown();
   fut.wait();

@@ -1,6 +1,6 @@
 # D-Bus API
 
-<!-- Last Updated 2026-08-11 (post-consent replace can fail the new update) -->
+<!-- Last Updated 2026-08-11 (post-consent replace; commit retry on transient errors) -->
 
 ## Introduction
 
@@ -132,6 +132,13 @@ One rare edge case to consider:
 if the user consents to update A, and before the commit fetch the server cancels A and replaces it with update B, the commit fetch observes B (and marks it seen) while the device still expects A's `correlationId`.
 That mismatch fails the campaign; in practice **update B is what the server ends up marking failed**, even though the user never consented to B.
 This should be very rare, and the workaround is simply to retry the update from the server side.
+
+After a successful `Consent` with `granted=true`, Aktualizr confirms metadata
+with a commit fetch. Transient failures (for example the device is not yet on
+wifi when the user answers) are **retried** on the normal polling interval
+while retaining the consent already given. The campaign is only failed when the
+commit outcome is permanent (e.g. verification failure, or the offered update no
+longer matches the `correlationId` that was consented).
 
 If the user declines, the update fails with a result code indicating that condition.
 This will get posted up with the next put manifest as `CONSENT_REFUSED`, and fail the update in the Web UI.

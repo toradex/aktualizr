@@ -423,7 +423,9 @@ class Aktualizr {
     kCheckingForUpdates,
     /** We are waiting for user consent to install an update */
     kGetConsent,
-    /** We performed a commit fetch after consent was granted or refused, and are verifying targets. */
+    /** We performed a commit fetch after consent was granted or refused.
+     * After a grant, transient commit failures are retried here; permanent
+     * ones (already recorded by checkUpdates) send a failure manifest. */
     kConfirmingUpdate,
     /** We are downloading an update, and are waiting for it to complete.*/
     kDownloading,
@@ -465,6 +467,13 @@ class Aktualizr {
    * it from director_repo (which may have been overwritten by a concurrent fetch).
    */
   void StoreInstallationFailure(const data::InstallationResult& result, const std::string& correlation_id);
+
+  /**
+   * True if storage already holds a non-success device installation result for
+   * \p correlation_id. Used by kConfirmingUpdate to distinguish permanent
+   * commit failures (recorded inside checkUpdates) from transient kError.
+   */
+  bool HasInstallationFailureFor(const std::string& correlation_id) const;
 
   /**
    * Handle the result of a peek update-check that ran while we were waiting

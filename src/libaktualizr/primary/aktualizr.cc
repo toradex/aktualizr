@@ -420,32 +420,51 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
         }
         break;
       case UpdateCycleState::kConfirmingUpdate:
-        if (op_update_check_.wait_until(next_offline_poll_) == std::future_status::ready) {
-          auto confirm_result = op_update_check_.get();
+        // After consent, permanent commit failures record an installation result
+        // inside checkUpdates (Uptane::Persistence::kPermanent, correlation-ID
+        // mismatch, target mismatch). kError without a stored failure for this
+        // correlation ID is treated as transient (e.g. connectivity loss) and
+        // retried — consent was already granted locally and must not burn the
+        // campaign on a network blip.
+        if (op_update_check_.valid()) {
+          if (op_update_check_.wait_until(next_offline_poll_) == std::future_status::ready) {
+            auto confirm_result = op_update_check_.get();
 
-          if (!last_consent_outcome_.granted()) {
-            LOG_WARNING << "User refused consent of update: " << last_consent_outcome_.reason;
-            StoreInstallationFailure(
-                data::InstallationResult(data::ResultCode::Numeric::kConsentRefused, last_consent_outcome_.reason),
-                peek_correlation_id_);
-            op_put_manifest_ = SendManifest();
-            state_ = UpdateCycleState::kSendingManifest;
-          } else if (confirm_result.status == result::UpdateStatus::kUpdatesAvailable) {
-            update_result_ = confirm_result;
-            op_download_ = Download(update_result_.updates);
-            state_ = UpdateCycleState::kDownloading;
-          } else {
-            LOG_WARNING << "Update changed or was cancelled after consent: " << confirm_result.message;
-            if (confirm_result.status == result::UpdateStatus::kError) {
+            if (!last_consent_outcome_.granted()) {
+              LOG_WARNING << "User refused consent of update: " << last_consent_outcome_.reason;
               StoreInstallationFailure(
-                  data::InstallationResult(data::ResultCode::Numeric::kInternalError, confirm_result.message),
+                  data::InstallationResult(data::ResultCode::Numeric::kConsentRefused, last_consent_outcome_.reason),
                   peek_correlation_id_);
               op_put_manifest_ = SendManifest();
               state_ = UpdateCycleState::kSendingManifest;
+            } else if (confirm_result.status == result::UpdateStatus::kUpdatesAvailable) {
+              update_result_ = confirm_result;
+              op_download_ = Download(update_result_.updates);
+              state_ = UpdateCycleState::kDownloading;
+            } else if (confirm_result.status == result::UpdateStatus::kError) {
+              if (HasInstallationFailureFor(peek_correlation_id_)) {
+                LOG_WARNING << "Permanent failure confirming update after consent: " << confirm_result.message;
+                // checkUpdates already stored the installation failure.
+                op_put_manifest_ = SendManifest();
+                state_ = UpdateCycleState::kSendingManifest;
+              } else {
+                LOG_WARNING << "Transient failure confirming update after consent; will retry: "
+                            << confirm_result.message;
+                next_online_poll_ = now + std::chrono::seconds(config_.uptane.polling_sec);
+                // op_update_check_ is already invalid after get(); re-issue below.
+              }
             } else {
+              // kNoUpdatesAvailable: server withdrew the update.
+              LOG_WARNING << "Update changed or was cancelled after consent: " << confirm_result.message;
               state_ = UpdateCycleState::kIdle;
             }
           }
+        } else if (next_online_poll_ <= now) {
+          op_update_check_ = CommitUpdate(peek_correlation_id_);
+        } else {
+          std::unique_lock<std::mutex> guard{exit_cond_.m};
+          auto next_wake_up = std::min(next_offline_poll_, next_online_poll_);
+          exit_cond_.cv.wait_until(guard, next_wake_up);
         }
         break;
       case UpdateCycleState::kDownloading:
@@ -705,6 +724,16 @@ void Aktualizr::StoreInstallationFailure(const data::InstallationResult &result,
   std::function<void()> task(
       [this, result, correlation_id] { uptane_client_->storeInstallationFailure(result, correlation_id); });
   api_queue_->enqueue(std::move(task));
+}
+
+bool Aktualizr::HasInstallationFailureFor(const std::string &correlation_id) const {
+  data::InstallationResult result;
+  std::string raw_report;
+  std::string stored_correlation_id;
+  if (!storage_->loadDeviceInstallationResult(&result, &raw_report, &stored_correlation_id)) {
+    return false;
+  }
+  return stored_correlation_id == correlation_id && !result.isSuccess();
 }
 
 bool Aktualizr::SetInstallationRawReport(const std::string &custom_raw_report) {

@@ -1115,15 +1115,26 @@ result::UpdateCheck SotaUptaneClient::checkUpdates(UpdateType utype, bool peek,
                                                    const std::string &expected_correlation_id) {
   std::vector<Uptane::Target> updates;
   unsigned int ecus_count = 0;
+  // Prefer the correlation ID the caller is committing to (post-consent). Director
+  // metadata may already describe a different offer by the time we fail.
+  const auto failure_correlation_id = [&]() -> std::string {
+    if (!expected_correlation_id.empty()) {
+      return expected_correlation_id;
+    }
+    return director_repo.getCorrelationId();
+  };
   try {
     uptaneIteration(&updates, &ecus_count, utype, peek);
   } catch (const Uptane::Exception &e) {
     // TODO: Consider using this check throughout sotauptaneclient for more consistent exception handling.
+    // Permanent failures record an installation result here. Temporary ones (e.g.
+    // MetadataFetchFailure) return kError without storing, so kConfirmingUpdate can
+    // retry the commit fetch while retaining consent.
     if (e.getPersistence() == Uptane::Persistence::kPermanent && utype == UpdateType::kOnline) {
       LOG_ERROR << "Unable to verify metadata.";
       storeInstallationFailure(
           data::InstallationResult(data::ResultCode::Numeric::kVerificationFailed, "Could not update metadata"),
-          director_repo.getCorrelationId());
+          failure_correlation_id());
     }
     last_exception = std::current_exception();
     return {{}, 0, result::UpdateStatus::kError, "Could not update metadata."};
@@ -1146,6 +1157,12 @@ result::UpdateCheck SotaUptaneClient::checkUpdates(UpdateType utype, bool peek,
     if (actual_correlation_id != expected_correlation_id) {
       LOG_ERROR << "Correlation ID mismatch: expected " << expected_correlation_id << " but got "
                 << actual_correlation_id;
+      // Permanent for this consent cycle: the user approved a different offer than
+      // what the server now has. Record the failure so kConfirmingUpdate does not retry.
+      storeInstallationFailure(
+          data::InstallationResult(data::ResultCode::Numeric::kInternalError,
+                                   "Update changed between peek and commit (correlation ID mismatch)."),
+          expected_correlation_id);
       return {{}, 0, result::UpdateStatus::kError, "Update changed between peek and commit (correlation ID mismatch)."};
     }
   }
@@ -1179,7 +1196,7 @@ result::UpdateCheck SotaUptaneClient::checkUpdates(UpdateType utype, bool peek,
     LOG_ERROR << e.what();
     storeInstallationFailure(
         data::InstallationResult(data::ResultCode::Numeric::kVerificationFailed, "Metadata verification failed."),
-        director_repo.getCorrelationId());
+        failure_correlation_id());
     return {{}, 0, result::UpdateStatus::kError, "Target mismatch."};
   }
 
