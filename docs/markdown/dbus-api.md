@@ -1,6 +1,6 @@
 # D-Bus API
 
-<!-- Last Updated 2025-05-06 by Phil Wise -->
+<!-- Last Updated 2026-08-11 (post-consent replace can fail the new update) -->
 
 ## Introduction
 
@@ -50,10 +50,11 @@ For manual testing, `busctl` can be used:
 This is the API that will drive a UI to display "An update is available, do you want to install it?" and handle the user's response.
 
 Aktualizr exposes a read-only property with change notifications called `ConsentRequired`.
-If this is non-empty, then it contains a list of Uptane Targets from the director in JSON format, for example:
+If this is non-empty, then it contains a list of Uptane Targets in JSON format (Director metadata with Image-repo custom fields merged in; Director wins on conflicts), plus a top-level `correlationId` field identifying the update offer, for example:
 
     {
         "_type" : "Targets",
+        "correlationId" : "urn:tdx-ota:lockbox:my-update:42",
         "targets" :
         {
             "primary_firmware.txt" :
@@ -86,33 +87,75 @@ For manual testing, this can be read with:
 
     busctl get-property org.uptane.Aktualizr /org/uptane/aktualizr org.uptane.Aktualizr ConsentRequired
 
+### `ConsentRequired` is a live property
+
+`ConsentRequired` can change at any time, including **while it is non-empty**:
+Aktualizr keeps polling for updates while it waits for consent (see below), and if a newer update supersedes the pending one, the property is replaced with the new offer (carrying a different `correlationId`).
+
+Clients must subscribe to `org.freedesktop.DBus.Properties.PropertiesChanged` and re-read the property on every change.
+The signal fires on every transition: when a request appears, when it is superseded by a new offer, when it is withdrawn or cancelled, and when it is resolved via the `Consent` method.
+
+When the `correlationId` changes, treat it as a **new offer**:
+dismiss or replace any prompt that is currently showing, and discard any in-flight user action tied to the old `correlationId`.
+
+If the update is retracted on the server, `ConsentRequired` becomes empty (with a `PropertiesChanged` signal) and the device returns to idle.
+No `ConsentOutcome` event is sent in that case, since the user never decided.
+
+### The `Consent` method
+
 The user's response should be provided back to Aktualizr via a method call called `Consent` with the following parameters:
 
   * `granted` (boolean): If the installation should continue
   * `reason` (string): A human-readable description
+  * `correlationId` (string): The `correlationId` from the `ConsentRequired` JSON that this response refers to
+
+> **Breaking change**: the `Consent` signature changed from `bs` to `bss`.
+> Consent UIs written against the old two-parameter signature must be updated
+> to extract `correlationId` from the `ConsentRequired` JSON and pass it back.
 
 For example:
 
-    # Install whatever ConsentRequired is asking about
-    busctl call org.uptane.Aktualizr /org/uptane/aktualizr org.uptane.Aktualizr Consent bs true "All good"
+    # Read ConsentRequired, extract "correlationId" from the JSON, then:
+    busctl call org.uptane.Aktualizr /org/uptane/aktualizr org.uptane.Aktualizr \
+        Consent bss true "All good" "urn:tdx-ota:lockbox:my-update:42"
+
+The `correlationId` must exactly match the pending offer:
+
+  * On mismatch the call fails with `org.freedesktop.DBus.Error.InvalidArgs` and the consent request **remains pending**. This happens when the offer was superseded while the user was deciding; the UI should re-read `ConsentRequired` and prompt again for the new offer.
+  * If no request is pending at all, the call fails with `org.freedesktop.DBus.Error.Failed` (as before).
+
+Note that a successful `Consent` reply does **not** guarantee that the update installs:
+the update can still be superseded or cancelled on the server between the reply and the commit fetch that follows it.
+The device never installs something other than what the matching `correlationId` referred to.
+
+One rare edge case to consider:
+if the user consents to update A, and before the commit fetch the server cancels A and replaces it with update B, the commit fetch observes B (and marks it seen) while the device still expects A's `correlationId`.
+That mismatch fails the campaign; in practice **update B is what the server ends up marking failed**, even though the user never consented to B.
+This should be very rare, and the workaround is simply to retry the update from the server side.
 
 If the user declines, the update fails with a result code indicating that condition.
 This will get posted up with the next put manifest as `CONSENT_REFUSED`, and fail the update in the Web UI.
-The Aktualizr state machine pauses after fetching Updane metadata but before downloading the update itself.
-While the system is waiting for consent we don't poll for online updates, but an offline update can cause it to cancel.
-This is the same as today where a offline update can cancel a download operation.
+The Aktualizr state machine pauses after fetching Uptane metadata but before downloading the update itself.
+
+### Polling while waiting for consent
+
+While the system is waiting for consent, Aktualizr keeps polling the server on the normal polling interval using "peek" update checks (which do not mark the update as in-progress on the server).
+This is what allows a newer update to supersede the pending offer, or a server-side cancellation to withdraw it.
+An offline update can still cancel the pending consent request, the same as today where an offline update can cancel a download operation.
 
 During this process, events are send to the server using the reliable `ReportQueue` transport at 2 points:
 
 | Event Name | Fields | Send When... |
 |:--|:--|:--|
-| `AwaitingConsent` | `correlationId` | **Installation is waiting for consent**<br/>This is sent in trivial cases too. |
-| `ConsentOutcome` | `correlationId`,<br/>`granted`&nbsp;(boolean),<br/>`reason` (string) | **Consent is given or refused**<br/>If `granted` is true, then installation is proceeding. Cancellations via offline updates are reported as `granted`:false and `reason`:"Cancelled by offline update". Trivial cases are reported with a reason like "User has not requested consent" or "D-Bus not complied into Aktualizr". |
+| `AwaitingConsent` | `correlationId` | **Installation is waiting for consent**<br/>This is sent in trivial cases too. If the offered update changes before consent is given, another `AwaitingConsent` is sent carrying the new `correlationId`, so multiple events per cycle are expected. |
+| `ConsentOutcome` | `correlationId`,<br/>`granted`&nbsp;(boolean),<br/>`reason` (string) | **Consent is given or refused**<br/>If `granted` is true, then installation is proceeding. Cancellations via offline updates are reported as `granted`:false and `reason`:"Cancelled by offline update". Trivial cases are reported with a reason like "User has not requested consent" or "D-Bus not complied into Aktualizr". No `ConsentOutcome` is sent for offers that were superseded or withdrawn before the user decided. |
 
 ## Check For Updates
 
 The `CheckForUpdates` method short-circuits the online polling timer and causes an immediate update check.
-If the device is not currently in the idle state, then we do nothing.
+This works in the idle state and also while the device is waiting for consent
+(where it triggers an immediate peek check, unless one is already running).
+In other states we do nothing.
 
 When working interactively with a device, this can be easier than running a short polling interval or waiting for the next update check:
 
