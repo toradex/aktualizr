@@ -56,6 +56,7 @@ stages:
     - suf=${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}
     - suf=${suf:-${CI_COMMIT_BRANCH}}
     - suf=${suf?Could not determine tag suffix}
+    - suf=$(echo "${suf}" | tr '/' '-' | tr '[:upper:]' '[:lower:]')
     - tag="${CI_REGISTRY_IMAGE}/${DOCKER_IMG}:${DOCKER_TAG}-${suf}"
     # Reference: https://docs.gitlab.com/ci/docker/docker_layer_caching/
     - ${E} docker pull "${tag}" || true
