@@ -54,6 +54,13 @@ class TestJournal : public JournalHandle {
 
   int Next() override {
     std::lock_guard<std::mutex> lock(shared_->mutex);
+    // Non-blocking, matching sd_journal_next(): returns 0 immediately when
+    // there is no further entry, leaving any "wait for new entries" to the
+    // caller (the uploader thread's outer loop sleeps for kBatchInterval
+    // between non-full batches).
+    if (!shared_->is_open) {
+      return 0;
+    }
     if (position_ + 1 < static_cast<int>(shared_->entries.size())) {
       ++position_;
       return 1;
@@ -87,12 +94,8 @@ class TestJournal : public JournalHandle {
   bool MoveTail() override {
     std::lock_guard<std::mutex> lock(shared_->mutex);
     // Position this handle just before the first entry that may be added in
-    // the future. The subsequent Next() call must return any entries that
-    // arrive after this point, even if the journal is currently empty. This
-    // mirrors sd_journal_seek_tail()'s contract: a tail seek succeeds even
-    // when the journal has no entries, and the next sd_journal_next() call
-    // will block (or, for our test fake, return 0) until something is
-    // appended.
+    // the future, so the subsequent Next() call returns any entries that
+    // arrive after this point — mirroring sd_journal_seek_tail()'s contract.
     position_ = static_cast<int>(shared_->entries.size()) - 1;
     return true;
   }

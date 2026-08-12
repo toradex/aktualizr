@@ -1,10 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <future>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -87,6 +89,23 @@ class HttpFakeOnlineLogs : public HttpInterface {
   // Wait until at least one /install_logs PUT has been observed, or `timeout`
   // elapses. Returns the put count seen (0 on timeout, >0 on success).
   int WaitForInstallLog(std::chrono::steady_clock::duration timeout = std::chrono::seconds(5));
+
+  // Wait for the PUT count to reach `target` (or `target - 1` if you want to
+  // assert "no further PUT" within the timeout — i.e. the test passes if the
+  // wait times out before the target is hit). Blocks on the same cv that
+  // put() notifies, so it returns as soon as the worker thread issues a PUT
+  // rather than racing with a fixed-duration timer. The `timeout` only acts
+  // as a hang detector.
+  bool WaitForPutCount(int target, std::chrono::steady_clock::duration timeout) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return install_logs_cv_.wait_for(lock, timeout, [this, target] { return install_logs_put_count_ >= target; });
+  }
+
+  // Convenience wrapper that returns the put count once at least one PUT has
+  // happened, or 0 on timeout.
+  int WaitForInstallLogWithTimeout(std::chrono::steady_clock::duration timeout) {
+    return WaitForPutCount(1, timeout) ? PutCount() : 0;
+  }
 
   // -- state tracking --------------------------------------------------------
   std::mutex mutex_;
@@ -270,6 +289,99 @@ TEST(OnlineLogsUploader, IgnoresUnmatchedServices) {
   EXPECT_EQ(messages[0], "Installing");
 }
 
+// Multiple distinct batches of log entries should each be PUT to the server
+// independently. The uploader's outer loop must continue streaming after the
+// first batch is acknowledged (rather than only delivering the first chunk).
+TEST(OnlineLogsUploader, StreamsMultipleBatches) {
+  Config config;
+  config.logger.online_logs_enabled = true;
+  config.logger.capture_services = {"aktualizr"};
+  config.tls.server = "https://example.com";
+
+  auto http = std::make_shared<HttpFakeOnlineLogs>();
+  auto journal = std::make_shared<TestJournal>();
+
+  OnlineLogsUploader uploader(config, http, journal);
+
+  uploader.Begin("correlation-multibatch");
+  ASSERT_TRUE(uploader.IsActive());
+
+  // -- batch 1: a couple of entries that should arrive as the first PUT ---
+  journal->AddEntry("aktualizr.service", "checking for updates", 1731142800000000LL, "cursor-1");
+  journal->AddEntry("aktualizr.service", "downloading target", 1731142801000000LL, "cursor-2");
+
+  ASSERT_GT(http->WaitForInstallLog(std::chrono::seconds(15)), 0);
+
+  // -- batch 2: more entries added after the first batch has been PUT -------
+  // The worker sleeps for kBatchInterval (5s) between non-full batches. Give
+  // it room to wake, drain the new entries, and emit a second PUT.
+  journal->AddEntry("aktualizr.service", "applying update", 1731142802000000LL, "cursor-3");
+  journal->AddEntry("aktualizr.service", "update applied", 1731142803000000LL, "cursor-4");
+
+  // Wait until we have observed at least two PUTs.
+  {
+    std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (std::chrono::steady_clock::now() < deadline) {
+      if (http->PutCount() >= 2) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
+
+  // -- batch 3: yet another round to be sure streaming keeps going ----------
+  journal->AddEntry("aktualizr.service", "rebooting", 1731142804000000LL, "cursor-5");
+  journal->AddEntry("aktualizr.service", "post-boot", 1731142805000000LL, "cursor-6");
+
+  // Wait for the third PUT.
+  {
+    std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (std::chrono::steady_clock::now() < deadline) {
+      if (http->PutCount() >= 3) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
+
+  uploader.End();
+  EXPECT_FALSE(uploader.IsActive());
+
+  // -- assertions: every entry should appear in some PUT, and each PUT ------
+  // should carry its own startCursor.
+  const auto puts = http->Puts();
+  ASSERT_GE(puts.size(), 3U) << "expected at least three PUTs to /install_logs, got " << puts.size();
+
+  std::vector<std::string> messages;
+  std::set<std::string> start_cursors;
+  for (const auto& body : puts) {
+    EXPECT_EQ(body["correlationId"].asString(), "correlation-multibatch");
+    ASSERT_TRUE(body.isMember("startCursor"));
+    start_cursors.insert(body["startCursor"].asString());
+    for (const auto& entry : body["logs"]) {
+      messages.push_back(entry["message"].asString());
+    }
+  }
+
+  // Six distinct entries were added; all six must have been uploaded.
+  EXPECT_EQ(messages.size(), 6U);
+  EXPECT_NE(std::find(messages.begin(), messages.end(), "checking for updates"), messages.end());
+  EXPECT_NE(std::find(messages.begin(), messages.end(), "downloading target"), messages.end());
+  EXPECT_NE(std::find(messages.begin(), messages.end(), "applying update"), messages.end());
+  EXPECT_NE(std::find(messages.begin(), messages.end(), "update applied"), messages.end());
+  EXPECT_NE(std::find(messages.begin(), messages.end(), "rebooting"), messages.end());
+  EXPECT_NE(std::find(messages.begin(), messages.end(), "post-boot"), messages.end());
+
+  // Each PUT should have its own startCursor matching the first entry of that
+  // batch — if the body were being reused without resetting startCursor, this
+  // would collapse to a single cursor across all PUTs.
+  EXPECT_EQ(start_cursors.size(), puts.size())
+      << "each PUT must carry the cursor of its first entry, not a reused cursor from batch 1";
+  EXPECT_TRUE(start_cursors.count("cursor-1") > 0);
+  EXPECT_TRUE(start_cursors.count("cursor-3") > 0);
+  EXPECT_TRUE(start_cursors.count("cursor-5") > 0);
+}
+
 // A 404 response means the server doesn't support the endpoint; the uploader
 // should stop trying for this update and not PUT further batches.
 TEST(OnlineLogsUploader, StopsUploadingAfter404) {
@@ -289,13 +401,24 @@ TEST(OnlineLogsUploader, StopsUploadingAfter404) {
 
   journal->AddEntry("aktualizr.service", "first", 1731142800000000LL, "cursor-1");
 
-  ASSERT_GT(http->WaitForInstallLog(), 0);
+  // Event-driven wait: blocks until the worker has emitted its first PUT, or
+  // a generous safety timeout (covers a genuine hang in production code). This
+  // is the fix for the previous flake where both this wait and the worker's
+  // internal kBatchInterval poll used the same 5 s, causing the test to time
+  // out at exactly the moment the worker finally woke up.
+  ASSERT_TRUE(http->WaitForPutCount(1, std::chrono::seconds(10)))
+      << "first PUT never arrived (worker may be stuck or polling slower than expected)";
   int after_first = http->PutCount();
 
-  // Further entries should not generate more PUTs since the uploader disabled
-  // itself for this update after the 404.
+  // Add another entry. The uploader must not PUT it: it should have disabled
+  // itself for this update after observing the 404 on the first PUT. After a
+  // 404, the worker exits at the top of its outer loop on the next iteration
+  // (it first sleeps for the remaining kBatchInterval slice). One full poll
+  // interval is enough headroom for the worker to either re-PUT (which would
+  // be a regression) or fully exit its run loop.
   journal->AddEntry("aktualizr.service", "second", 1731142801000000LL, "cursor-2");
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  EXPECT_FALSE(http->WaitForPutCount(after_first + 1, std::chrono::seconds(10)))
+      << "uploader emitted a second PUT after a 404 response";
 
   uploader.End();
 
