@@ -850,7 +850,8 @@ result::Download SotaUptaneClient::downloadImages(const std::vector<Uptane::Targ
   } else if (update_status == result::UpdateStatus::kError) {
     result = result::Download(downloaded_targets, result::DownloadStatus::kError, "Error rechecking stored metadata.");
     storeInstallationFailure(
-        data::InstallationResult(data::ResultCode::Numeric::kInternalError, "Error rechecking stored metadata."));
+        data::InstallationResult(data::ResultCode::Numeric::kInternalError, "Error rechecking stored metadata."),
+        director_repo.getCorrelationId());
   }
 
   if (update_status != result::UpdateStatus::kUpdatesAvailable) {
@@ -879,7 +880,8 @@ result::Download SotaUptaneClient::downloadImages(const std::vector<Uptane::Targ
       result = result::Download(downloaded_targets, result::DownloadStatus::kPartialSuccess, "");
     }
     storeInstallationFailure(
-        data::InstallationResult(data::ResultCode::Numeric::kDownloadFailed, "Target download failed."));
+        data::InstallationResult(data::ResultCode::Numeric::kDownloadFailed, "Target download failed."),
+        director_repo.getCorrelationId());
   }
 
   sendEvent<event::AllDownloadsComplete>(result);
@@ -896,15 +898,19 @@ void SotaUptaneClient::reportResume() {
   report_queue->enqueue(std_::make_unique<DeviceResumedReport>(correlation_id));
 }
 
-void SotaUptaneClient::reportAwaitingConsent() {
-  auto correlation_id = director_repo.getCorrelationId();
+// Note: the correlation ID is passed in by the caller rather than read from
+// director_repo here. These methods are called on the state machine thread,
+// and with peek polling during consent a fetch on the api_queue thread may be
+// mutating director_repo concurrently; the caller also knows which offer the
+// report is actually about.
+void SotaUptaneClient::reportAwaitingConsent(const std::string &correlation_id) {
   report_queue->enqueue(std::make_unique<AwaitingConsentReport>(correlation_id));
 }
 
-void SotaUptaneClient::reportConsentOutcome(const Consent::Outcome &consent_outcome) {
-  auto correlation_id = director_repo.getCorrelationId();
+void SotaUptaneClient::reportConsentOutcome(const Consent::Outcome &consent_outcome,
+                                            const std::string &correlation_id) {
   report_queue->enqueue(
-      std::make_unique<ConsentOutcomeReport>(correlation_id, consent_outcome.granted, consent_outcome.reason));
+      std::make_unique<ConsentOutcomeReport>(correlation_id, consent_outcome.granted(), consent_outcome.reason));
 }
 
 bool SotaUptaneClient::needTargetFileOnPrimary(const Uptane::Target &target) {
@@ -1116,7 +1122,8 @@ result::UpdateCheck SotaUptaneClient::checkUpdates(UpdateType utype, bool peek,
     if (e.getPersistence() == Uptane::Persistence::kPermanent && utype == UpdateType::kOnline) {
       LOG_ERROR << "Unable to verify metadata.";
       storeInstallationFailure(
-          data::InstallationResult(data::ResultCode::Numeric::kVerificationFailed, "Could not update metadata"));
+          data::InstallationResult(data::ResultCode::Numeric::kVerificationFailed, "Could not update metadata"),
+          director_repo.getCorrelationId());
     }
     last_exception = std::current_exception();
     return {{}, 0, result::UpdateStatus::kError, "Could not update metadata."};
@@ -1171,7 +1178,8 @@ result::UpdateCheck SotaUptaneClient::checkUpdates(UpdateType utype, bool peek,
     last_exception = std::current_exception();
     LOG_ERROR << e.what();
     storeInstallationFailure(
-        data::InstallationResult(data::ResultCode::Numeric::kVerificationFailed, "Metadata verification failed."));
+        data::InstallationResult(data::ResultCode::Numeric::kVerificationFailed, "Metadata verification failed."),
+        director_repo.getCorrelationId());
     return {{}, 0, result::UpdateStatus::kError, "Target mismatch."};
   }
 
@@ -1623,10 +1631,12 @@ bool SotaUptaneClient::waitSecondariesReachable(const std::vector<Uptane::Target
   return false;
 }
 
-void SotaUptaneClient::storeInstallationFailure(const data::InstallationResult &result) {
+void SotaUptaneClient::storeInstallationFailure(const data::InstallationResult &result,
+                                                const std::string &correlation_id) {
   // Store installation report to inform Director of the update failure before
-  // we actually got to the install step.
-  auto correlation_id = director_repo.getCorrelationId();
+  // we actually got to the install step. correlation_id is passed in by the
+  // caller (same rationale as reportConsentOutcome): director_repo may have
+  // been overwritten by a fetch that observed a different update.
   if (correlation_id.empty()) {
     LOG_WARNING << "Correlation ID is blank, installation failure will not be logged";
     return;

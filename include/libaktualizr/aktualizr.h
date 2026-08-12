@@ -155,7 +155,7 @@ class Aktualizr {
    */
   std::future<result::UpdateCheck> CheckUpdates(CheckReason check_reason = CheckReason::kUnknown);
   std::future<result::UpdateCheck> CheckUpdatesPeek(CheckReason check_reason = CheckReason::kUnknown);
-  std::future<result::UpdateCheck> CommitUpdate(const std::string &correlation_id);
+  std::future<result::UpdateCheck> CommitUpdate(const std::string& correlation_id);
 
   /**
    * Download targets.
@@ -461,8 +461,17 @@ class Aktualizr {
 
   /**
    * Record a installation failure in the manifest we send.
+   * \p correlation_id identifies the update the failure is about; do not re-read
+   * it from director_repo (which may have been overwritten by a concurrent fetch).
    */
-  void StoreInstallationFailure(const data::InstallationResult& result);
+  void StoreInstallationFailure(const data::InstallationResult& result, const std::string& correlation_id);
+
+  /**
+   * Handle the result of a peek update-check that ran while we were waiting
+   * for consent (state kGetConsent). May supersede the pending consent offer,
+   * withdraw it (returning to kIdle), or do nothing.
+   */
+  void HandleConsentPeekResult(const result::UpdateCheck& peek);
 
   UpdateCycleState state_{UpdateCycleState::kUnprovisioned};
   // These hold a running operation for the current state

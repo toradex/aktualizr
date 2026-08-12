@@ -80,8 +80,8 @@ class SotaUptaneClient {
   void setCustomHardwareInfo(Json::Value hwinfo) { custom_hardware_info_ = std::move(hwinfo); }
   void reportPause();
   void reportResume();
-  void reportAwaitingConsent();
-  void reportConsentOutcome(const Consent::Outcome &consent_outcome);
+  void reportAwaitingConsent(const std::string &correlation_id);
+  void reportConsentOutcome(const Consent::Outcome &consent_outcome, const std::string &correlation_id);
   void sendDeviceData();
   result::UpdateCheck fetchMeta(bool peek = false, const std::string &expected_correlation_id = "",
                                 CheckReason check_reason = CheckReason::kUnknown);
@@ -98,7 +98,7 @@ class SotaUptaneClient {
   void deleteStoredTarget(const Uptane::Target &target) { package_manager_->removeTargetFile(target); }
   std::ifstream openStoredTarget(const Uptane::Target &target);
   bool getEcuSerials(EcuSerials *serials) const { return provisioner_.GetEcuSerials(serials); }
-  void storeInstallationFailure(const data::InstallationResult &result);
+  void storeInstallationFailure(const data::InstallationResult &result, const std::string &correlation_id);
 
 #ifdef BUILD_OFFLINE_UPDATES
   result::UpdateCheck fetchMetaOffUpd(const boost::filesystem::path &source_path);

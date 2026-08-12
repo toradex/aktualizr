@@ -71,23 +71,39 @@ class DbusCb {
   static int Consent(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
     auto *dbus = static_cast<Dbus *>(userdata);
     int granted;
-    const char *reason = nullptr;  // Owned by msg, see man sd_bus_message_read_basic
+    const char *reason = nullptr;          // Owned by msg, see man sd_bus_message_read_basic
+    const char *correlation_id = nullptr;  // Owned by msg
     sd_bus_message_read_basic(m, 'b', &granted);
     sd_bus_message_read_basic(m, 's', &reason);
+    sd_bus_message_read_basic(m, 's', &correlation_id);
     {
       std::lock_guard guard{dbus->lock_};
-      if (!dbus->current_consent_request_.empty()) {
-        Consent::Outcome outcome;
-        outcome.granted = granted != 0;
-        outcome.was_cancelled = false;
-        outcome.reason = reason;
-        dbus->current_consent_promise_.set_value(std::move(outcome));
-        dbus->current_consent_request_.clear();
-      } else {
+      if (dbus->current_consent_request_.empty()) {
         LOG_WARNING << "Consent was granted over D-Bus when no request pending. Ignoring";
         return sd_bus_error_set(ret_error, SD_BUS_ERROR_FAILED, "No consent request is currently outstanding");
       }
+      if (dbus->current_correlation_id_ != correlation_id) {
+        // The offer changed (or the caller is confused). Leave the pending
+        // request untouched; the caller should re-read ConsentRequired.
+        LOG_WARNING << "Consent received over D-Bus for correlationId " << correlation_id
+                    << " but the pending request is for " << dbus->current_correlation_id_ << ". Rejecting";
+        return sd_bus_error_set(ret_error, SD_BUS_ERROR_INVALID_ARGS,
+                                "correlationId does not match the pending consent request");
+      }
+      Consent::Outcome outcome;
+      outcome.result = granted != 0 ? Consent::Outcome::Result::kGranted : Consent::Outcome::Result::kRefused;
+      outcome.reason = reason;
+      outcome.correlation_id = correlation_id;
+      dbus->current_consent_promise_.set_value(std::move(outcome));
+      dbus->current_consent_request_.clear();
+      dbus->current_correlation_id_.clear();
     }
+    // The ConsentRequired property just became empty. We are already on the
+    // D-Bus thread, so emit the change notification directly (the wake pipe is
+    // only needed from other threads). The lock must be dropped first: the
+    // property getter re-acquires it.
+    sd_bus_emit_properties_changed(sd_bus_message_get_bus(m), Dbus::Path, Dbus::Interface, Dbus::ConsentRequired,
+                                   nullptr);
 
     return sd_bus_reply_method_return(m, "");
   }
@@ -166,7 +182,7 @@ static const sd_bus_vtable dbus_vtable[] = {
     SD_BUS_VTABLE_START(0),
     SD_BUS_METHOD(Dbus::Cancel, "", "", DbusCb::Cancel, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD(Dbus::CheckForUpdates, "", "", DbusCb::CheckForUpdates, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD(Dbus::Consent, "bs", "", DbusCb::Consent, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD(Dbus::Consent, "bss", "", DbusCb::Consent, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_PROPERTY(Dbus::ConsentRequired, "s", DbusCb::ConsentRequired, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
     SD_BUS_WRITABLE_PROPERTY(Dbus::InstallUpdatesAutomatically, "i", DbusCb::GetInstallUpdatesAutomatically, DbusCb::SetInstallUpdatesAutomatically, 0, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD(Dbus::OfflineUpdate, "s", "", DbusCb::OfflineUpdate, SD_BUS_VTABLE_UNPRIVILEGED),
@@ -303,15 +319,38 @@ void Dbus::SetOfflineUpdateCallback(std::function<void(const boost::filesystem::
   offline_update_callback_ = std::move(offline_update_callback);
 }
 
-std::future<Consent::Outcome> Dbus::GetConsent(const std::vector<Uptane::Target> &targets) {
+std::future<Consent::Outcome> Dbus::GetConsent(const std::vector<Uptane::Target> &targets,
+                                               const std::string &correlation_id) {
   auto install_automatically = InstallUpdatesAutomatically::kProceed;
 
   storage_->loadInstallUpdatesAutomatically(&install_automatically);
 
   if (install_automatically == InstallUpdatesAutomatically::kProceed) {
-    // No need for approval
+    // No need for approval. If an offer is still pending (e.g. the user
+    // enabled automatic updates while a consent prompt was outstanding and a
+    // supersession re-called us), resolve and clear it so the ConsentRequired
+    // property doesn't keep advertising a stale offer forever.
+    bool cleared_pending = false;
+    {
+      std::lock_guard<std::mutex> guard{lock_};
+      if (!current_consent_request_.empty()) {
+        std::promise<Consent::Outcome> promise;
+        std::swap(promise, current_consent_promise_);
+        promise.set_value({Outcome::Result::kSuperseded, "Superseded: updates are now installed automatically",
+                           current_correlation_id_});
+        current_consent_request_.clear();
+        current_correlation_id_.clear();
+        cleared_pending = true;
+      }
+    }
+    if (cleared_pending) {
+      ssize_t res = write(stop_fds_[1], "c", 1);
+      if (res < 0) {
+        LOG_ERROR << "Failed to wake up sd_bus thread:" << errno;
+      }
+    }
     std::promise<Outcome> p;
-    p.set_value({true, false, "User has not requested to approve updates"});
+    p.set_value({Outcome::Result::kGranted, "User has not requested to approve updates", correlation_id});
     return p.get_future();
   }
 
@@ -319,18 +358,22 @@ std::future<Consent::Outcome> Dbus::GetConsent(const std::vector<Uptane::Target>
   {
     // Build the new value of the 'Consent' property
     auto formated_targets = TargetsToJson(targets);
+    formated_targets["correlationId"] = correlation_id;
 
     // Now lock..
     std::lock_guard<std::mutex> guard{lock_};
 
     // Create a new promise. If there was already a consent request in flight,
-    // then resolve the old one with a 'cancelled' outcome.
+    // then resolve the old one as superseded. The state machine swaps to the
+    // new future without reading the old one; the value is a fail-safe for
+    // anything that does read it.
     std::promise<Consent::Outcome> promise;
     std::swap(promise, current_consent_promise_);
     if (!current_consent_request_.empty()) {  // Is the old promise alive?
-      promise.set_value({false, true, "Replaced by new request"});
+      promise.set_value({Outcome::Result::kSuperseded, "Superseded by newer update", current_correlation_id_});
     }
     current_consent_request_ = Utils::jsonToStr(formated_targets);
+    current_correlation_id_ = correlation_id;
     result = current_consent_promise_.get_future();
   }
   // Drop lock and wake the D-Bus thread
@@ -349,13 +392,14 @@ void Dbus::PendingUpdateCancelled() {
       // Nothing in progress, no-op
       return;
     }
-    // Clear out the property
-    current_consent_request_.clear();
-
     // Resolve old promise as cancelled
     std::promise<Consent::Outcome> promise;
     std::swap(promise, current_consent_promise_);
-    promise.set_value({false, true, "Cancelled"});
+    promise.set_value({Consent::Outcome::Result::kCancelled, "Cancelled", current_correlation_id_});
+
+    // Clear out the property
+    current_consent_request_.clear();
+    current_correlation_id_.clear();
   }
   // Drop lock and wake the D-Bus thread
   ssize_t res = write(stop_fds_[1], "c", 1);

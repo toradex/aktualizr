@@ -66,8 +66,8 @@ class Dbus : public Consent {
   Dbus &operator=(Dbus &&) = delete;
 
   // Consent implementation
-  std::future<Outcome> GetConsent(const std::vector<Uptane::Target> &targets) override;
-
+  std::future<Outcome> GetConsent(const std::vector<Uptane::Target> &targets,
+                                  const std::string &correlation_id) override;
   void PendingUpdateCancelled() override;
 
   // Register callback for Aktualizr
@@ -113,6 +113,8 @@ class Dbus : public Consent {
   std::function<void(const boost::filesystem::path &)> offline_update_callback_;
   /** The currently in-flight request. Empty => Nothing in flight */
   std::string current_consent_request_;
+  /** Correlation ID of the currently in-flight request. Valid iff current_consent_request_ is non-empty */
+  std::string current_correlation_id_;
   /** If there is an in-flight request, then this is valid */
   std::promise<Consent::Outcome> current_consent_promise_;
 };

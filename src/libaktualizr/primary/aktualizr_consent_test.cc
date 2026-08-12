@@ -18,8 +18,9 @@
 #include "uptane_repo.h"
 #include "uptane_test_common.h"
 
-#include <boost/filesystem.hpp>
 #include <algorithm>
+#include <atomic>
+#include <boost/filesystem.hpp>
 #include <chrono>
 #include <condition_variable>
 #include <functional>
@@ -42,9 +43,8 @@ class HttpFakePeek : public HttpFake {
                    const Headers *extra_headers) override {
     if (url.find("/director/targets.json") != std::string::npos) {
       const bool is_peek = extra_headers != nullptr &&
-                           std::any_of(extra_headers->begin(), extra_headers->end(), [](const std::string &header) {
-                             return header == "x-trx-mark-seen: false";
-                           });
+                           std::any_of(extra_headers->begin(), extra_headers->end(),
+                                       [](const std::string &header) { return header == "x-trx-mark-seen: false"; });
       if (is_peek) {
         peek_requests_++;
       } else {
@@ -58,8 +58,8 @@ class HttpFakePeek : public HttpFake {
   int commit_requests() const { return commit_requests_; }
 
  private:
-  int peek_requests_{0};
-  int commit_requests_{0};
+  std::atomic<int> peek_requests_{0};
+  std::atomic<int> commit_requests_{0};
 };
 
 /**
@@ -90,6 +90,31 @@ class AktualizrConsent : public testing::Test {
     repo_.signTargets();
   }
 
+  /**
+   * Re-sign the director targets with a new correlation ID and a different
+   * target, simulating the server superseding the offered update. Reuses the
+   * keys already on disk, so the root of trust is unchanged.
+   */
+  void SupersedeUpdate(const std::string &new_correlation_id) {
+    UptaneRepo repo_b{uptane_metadata_dir_, "2029-07-04T16:33:27Z", new_correlation_id};
+    const std::string hwid = "primary_hw";
+    auto firmware_path = uptane_metadata_dir_ / "targets/superseding_firmware.txt";
+    Utils::writeFile(firmware_path, std::string("newer firmware"));
+    repo_b.addImage(firmware_path, "superseding_firmware.txt", hwid);
+    repo_b.emptyTargets();
+    repo_b.addTarget("superseding_firmware.txt", hwid, "CA:FE:A6:D2:84:9D");
+    repo_b.signTargets();
+  }
+
+  /**
+   * Empty the director targets, simulating the server withdrawing the update.
+   */
+  void WithdrawUpdate() {
+    UptaneRepo repo_w{uptane_metadata_dir_, "2029-07-04T16:33:27Z", "withdrawn"};
+    repo_w.emptyTargets();
+    repo_w.signTargets();
+  }
+
   TemporaryDirectory temp_dir_;
   fs::path uptane_metadata_dir_;
   fs::path aktualizr_dir_;
@@ -103,10 +128,11 @@ class MockConsent : public Consent {
  public:
   explicit MockConsent(Json::Value *targets) : targets_{targets} { assert(targets_); }
 
-  std::future<Outcome> GetConsent(const std::vector<Uptane::Target> &targets) override {
+  std::future<Outcome> GetConsent(const std::vector<Uptane::Target> &targets,
+                                  const std::string &correlation_id) override {
     *targets_ = TargetsToJson(targets);
     std::promise<Outcome> p;
-    p.set_value({false, false, "Rejected in MockConsent"});
+    p.set_value({Outcome::Result::kRefused, "Rejected in MockConsent", correlation_id});
     return p.get_future();
   }
 
@@ -125,21 +151,22 @@ class ConfigurableConsent : public Consent {
 
   explicit ConfigurableConsent(Action action) : action_(action) {}
 
-  std::future<Outcome> GetConsent(const std::vector<Uptane::Target> & /* targets */) override {
+  std::future<Outcome> GetConsent(const std::vector<Uptane::Target> & /* targets */,
+                                  const std::string &correlation_id) override {
     get_consent_called_ = true;
     std::promise<Outcome> p;
     switch (action_) {
       case Action::kGrant:
-        p.set_value({true, false, "Granted in test"});
+        p.set_value({Outcome::Result::kGranted, "Granted in test", correlation_id});
         break;
       case Action::kRefuse:
-        p.set_value({false, false, "Refused in test"});
+        p.set_value({Outcome::Result::kRefused, "Refused in test", correlation_id});
         break;
       case Action::kCancel:
-        p.set_value({false, true, "Cancelled in test"});
+        p.set_value({Outcome::Result::kCancelled, "Cancelled in test", correlation_id});
         break;
       default:
-        p.set_value({false, true, "Unknown action in test"});
+        p.set_value({Outcome::Result::kCancelled, "Unknown action in test", correlation_id});
         break;
     }
     return p.get_future();
@@ -152,6 +179,80 @@ class ConfigurableConsent : public Consent {
  private:
   Action action_;
   bool get_consent_called_{false};
+};
+
+/**
+ * Consent implementation whose future stays pending until the test resolves
+ * it, mimicking a real user thinking about the prompt. Mirrors the promise
+ * lifecycle contract of Dbus::GetConsent.
+ */
+class PendingConsent : public Consent {
+ public:
+  std::future<Outcome> GetConsent(const std::vector<Uptane::Target> & /* targets */,
+                                  const std::string &correlation_id) override {
+    std::lock_guard<std::mutex> guard{m_};
+    if (pending_) {
+      // Same contract as Dbus::GetConsent: the old request is superseded
+      promise_.set_value({Outcome::Result::kSuperseded, "Superseded by newer update", correlation_id_});
+    }
+    promise_ = std::promise<Outcome>{};
+    pending_ = true;
+    correlation_id_ = correlation_id;
+    get_consent_calls_++;
+    cv_.notify_all();
+    return promise_.get_future();
+  }
+
+  void PendingUpdateCancelled() override {
+    std::lock_guard<std::mutex> guard{m_};
+    if (pending_) {
+      promise_.set_value({Outcome::Result::kCancelled, "Cancelled", correlation_id_});
+      pending_ = false;
+      cancel_calls_++;
+      cv_.notify_all();
+    }
+  }
+
+  /** Resolve the pending request, as if the user answered the prompt. */
+  void Respond(bool granted, const std::string &reason) {
+    std::lock_guard<std::mutex> guard{m_};
+    if (!pending_) {
+      throw std::runtime_error("PendingConsent::Respond called with no pending request");
+    }
+    promise_.set_value({granted ? Outcome::Result::kGranted : Outcome::Result::kRefused, reason, correlation_id_});
+    pending_ = false;
+  }
+
+  /** Wait until GetConsent has been called at least n times. */
+  bool WaitForGetConsentCalls(int n, std::chrono::seconds timeout) {
+    std::unique_lock<std::mutex> lock{m_};
+    return cv_.wait_for(lock, timeout, [&] { return get_consent_calls_ >= n; });
+  }
+
+  /** Wait until the pending request has been cancelled (offer withdrawn). */
+  bool WaitForCancel(std::chrono::seconds timeout) {
+    std::unique_lock<std::mutex> lock{m_};
+    return cv_.wait_for(lock, timeout, [&] { return cancel_calls_ >= 1; });
+  }
+
+  int GetConsentCalls() {
+    std::lock_guard<std::mutex> guard{m_};
+    return get_consent_calls_;
+  }
+
+  std::string CurrentCorrelationId() {
+    std::lock_guard<std::mutex> guard{m_};
+    return correlation_id_;
+  }
+
+ private:
+  std::mutex m_;
+  std::condition_variable cv_;
+  std::promise<Outcome> promise_;
+  bool pending_{false};
+  std::string correlation_id_;
+  int get_consent_calls_{0};
+  int cancel_calls_{0};
 };
 
 /**
@@ -261,8 +362,7 @@ TEST_F(AktualizrConsent, ConsentRefusedTriggersCommitAndFailure) {  // NOLINT
   dut.UptaneCycle();
 
   EXPECT_GE(http->peek_requests(), 1) << "Peek request should have been made";
-  EXPECT_GE(http->commit_requests(), 1)
-      << "Commit request should have been made even though consent was refused";
+  EXPECT_GE(http->commit_requests(), 1) << "Commit request should have been made even though consent was refused";
 
   // Check that no download was started (consent was refused)
   auto events = http->report_events();
@@ -295,8 +395,7 @@ TEST_F(AktualizrConsent, ConsentCancelledNoCommitFetch) {  // NOLINT
   // The commit_requests count should be 0 since no commit fetch is made.
   // (There may be a root rotation fetch that hits /director/root.json, but not
   // /director/targets.json without the query parameter.)
-  EXPECT_EQ(http->commit_requests(), 0)
-      << "No commit fetch should be made when consent is cancelled";
+  EXPECT_EQ(http->commit_requests(), 0) << "No commit fetch should be made when consent is cancelled";
 }
 
 /**
@@ -315,6 +414,157 @@ TEST_F(AktualizrConsent, AutoInstallUsesPeekAndCommit) {  // NOLINT
 
   EXPECT_GE(http->peek_requests(), 1) << "Peek requests should be made in auto-install mode";
   EXPECT_GE(http->commit_requests(), 1) << "Commit requests should also be made in auto-install mode";
+}
+
+namespace {
+
+/** Poll pred() every 100ms until it returns true or timeout expires. */
+template <typename Pred>
+bool WaitFor(Pred pred, std::chrono::seconds timeout) {
+  auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (!pred()) {
+    if (std::chrono::steady_clock::now() > deadline) {
+      return false;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+  return true;
+}
+
+int CountEvents(const std::vector<std::string> &events, const std::string &name) {
+  return static_cast<int>(std::count(events.begin(), events.end(), name));
+}
+
+}  // namespace
+
+/**
+ * While waiting for consent, the device keeps peek-polling. If the offer is
+ * unchanged (same correlation ID), it must not re-prompt or re-send
+ * AwaitingConsent.
+ */
+TEST_F(AktualizrConsent, UnchangedOfferDoesNotReprompt) {  // NOLINT
+  auto http = std::make_shared<HttpFakePeek>(temp_dir_.Path(), "", uptane_metadata_dir_ / "repo");
+  auto conf = UptaneTestCommon::makeTestConfig(temp_dir_, http->tls_server);
+  conf.uptane.polling_sec = 1;
+  auto storage = INvStorage::newStorage(conf.storage);
+  storage->storeInstallUpdatesAutomatically(InstallUpdatesAutomatically::kAsk);
+  UptaneTestCommon::TestAktualizr dut(conf, storage, http);
+
+  auto consent = std::make_unique<PendingConsent>();
+  auto *consent_ptr = consent.get();
+  dut.SetConsent(std::move(consent));
+  dut.Initialize();
+  auto fut = dut.RunForever();
+
+  ASSERT_TRUE(consent_ptr->WaitForGetConsentCalls(1, std::chrono::seconds(30))) << "Should prompt for consent";
+  EXPECT_EQ(consent_ptr->CurrentCorrelationId(), "id0");
+
+  // The device must keep peek-polling while the prompt is pending
+  int const peeks_at_prompt = http->peek_requests();
+  ASSERT_TRUE(WaitFor([&] { return http->peek_requests() >= peeks_at_prompt + 2; }, std::chrono::seconds(30)))
+      << "Should keep peek-polling while waiting for consent";
+
+  EXPECT_EQ(consent_ptr->GetConsentCalls(), 1) << "An unchanged offer must not re-prompt";
+  ASSERT_TRUE(
+      WaitFor([&] { return CountEvents(http->report_events(), "AwaitingConsent") >= 1; }, std::chrono::seconds(10)));
+  EXPECT_EQ(CountEvents(http->report_events(), "AwaitingConsent"), 1)
+      << "An unchanged offer must not re-send AwaitingConsent";
+  EXPECT_EQ(http->commit_requests(), 0) << "No commit fetch before the user decides";
+
+  // Granting still works after several peeks
+  consent_ptr->Respond(true, "ok");
+  ASSERT_TRUE(WaitFor([&] { return http->commit_requests() >= 1; }, std::chrono::seconds(30)))
+      << "Grant after peeks should lead to a commit fetch";
+
+  dut.Shutdown();
+  fut.wait();
+}
+
+/**
+ * If a peek during consent finds a different correlation ID, the pending
+ * offer is superseded: GetConsent is called again with the new targets and a
+ * fresh AwaitingConsent is sent. Granting the new offer installs it.
+ */
+TEST_F(AktualizrConsent, SupersededOfferRepromptsAndInstalls) {  // NOLINT
+  auto http = std::make_shared<HttpFakePeek>(temp_dir_.Path(), "", uptane_metadata_dir_ / "repo");
+  auto conf = UptaneTestCommon::makeTestConfig(temp_dir_, http->tls_server);
+  conf.uptane.polling_sec = 1;
+  auto storage = INvStorage::newStorage(conf.storage);
+  storage->storeInstallUpdatesAutomatically(InstallUpdatesAutomatically::kAsk);
+  UptaneTestCommon::TestAktualizr dut(conf, storage, http);
+
+  auto consent = std::make_unique<PendingConsent>();
+  auto *consent_ptr = consent.get();
+  dut.SetConsent(std::move(consent));
+  dut.Initialize();
+  auto fut = dut.RunForever();
+
+  ASSERT_TRUE(consent_ptr->WaitForGetConsentCalls(1, std::chrono::seconds(30))) << "Should prompt for consent";
+  EXPECT_EQ(consent_ptr->CurrentCorrelationId(), "id0");
+
+  // Deploy a newer update on the server while the prompt is pending
+  SupersedeUpdate("id1");
+
+  ASSERT_TRUE(consent_ptr->WaitForGetConsentCalls(2, std::chrono::seconds(30))) << "A changed offer should re-prompt";
+  EXPECT_EQ(consent_ptr->CurrentCorrelationId(), "id1");
+  ASSERT_TRUE(
+      WaitFor([&] { return CountEvents(http->report_events(), "AwaitingConsent") >= 2; }, std::chrono::seconds(10)))
+      << "Supersession should re-send AwaitingConsent";
+  EXPECT_EQ(http->commit_requests(), 0) << "No commit fetch before the user decides";
+  EXPECT_EQ(CountEvents(http->report_events(), "ConsentOutcome"), 0) << "No ConsentOutcome for the superseded offer";
+
+  // Grant the new offer; the update should proceed to download
+  consent_ptr->Respond(true, "yes to the new one");
+  ASSERT_TRUE(WaitFor([&] { return http->commit_requests() >= 1; }, std::chrono::seconds(30)));
+  ASSERT_TRUE(
+      WaitFor([&] { return CountEvents(http->report_events(), "EcuDownloadStarted") >= 1; }, std::chrono::seconds(30)))
+      << "Granting the superseding offer should download it";
+  EXPECT_EQ(CountEvents(http->report_events(), "ConsentOutcome"), 1)
+      << "Exactly one ConsentOutcome, for the offer the user actually answered";
+
+  dut.Shutdown();
+  fut.wait();
+}
+
+/**
+ * If a peek during consent finds no updates at all, the offer was withdrawn
+ * on the server: the pending consent request is cancelled, no ConsentOutcome
+ * is sent, and the device returns to idle (and keeps polling).
+ */
+TEST_F(AktualizrConsent, WithdrawnOfferCancelsConsent) {  // NOLINT
+  auto http = std::make_shared<HttpFakePeek>(temp_dir_.Path(), "", uptane_metadata_dir_ / "repo");
+  auto conf = UptaneTestCommon::makeTestConfig(temp_dir_, http->tls_server);
+  conf.uptane.polling_sec = 1;
+  auto storage = INvStorage::newStorage(conf.storage);
+  storage->storeInstallUpdatesAutomatically(InstallUpdatesAutomatically::kAsk);
+  UptaneTestCommon::TestAktualizr dut(conf, storage, http);
+
+  auto consent = std::make_unique<PendingConsent>();
+  auto *consent_ptr = consent.get();
+  dut.SetConsent(std::move(consent));
+  dut.Initialize();
+  auto fut = dut.RunForever();
+
+  ASSERT_TRUE(consent_ptr->WaitForGetConsentCalls(1, std::chrono::seconds(30))) << "Should prompt for consent";
+
+  // Retract the update on the server
+  WithdrawUpdate();
+
+  ASSERT_TRUE(consent_ptr->WaitForCancel(std::chrono::seconds(30)))
+      << "A withdrawn offer should cancel the pending consent request";
+
+  // The device should be idle again and keep polling
+  int const peeks_after_withdraw = http->peek_requests();
+  ASSERT_TRUE(WaitFor([&] { return http->peek_requests() >= peeks_after_withdraw + 2; }, std::chrono::seconds(30)))
+      << "Should return to idle polling after the offer is withdrawn";
+
+  EXPECT_EQ(http->commit_requests(), 0) << "A withdrawn offer must not be committed";
+  EXPECT_EQ(CountEvents(http->report_events(), "ConsentOutcome"), 0)
+      << "No ConsentOutcome for an offer the user never decided on";
+  EXPECT_EQ(consent_ptr->GetConsentCalls(), 1) << "No re-prompt after withdrawal";
+
+  dut.Shutdown();
+  fut.wait();
 }
 
 int main(int argc, char **argv) {

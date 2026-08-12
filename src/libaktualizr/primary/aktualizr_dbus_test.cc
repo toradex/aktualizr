@@ -189,12 +189,21 @@ TEST_F(AktualizrDbus, ConsentRejected) {
   }
   EXPECT_EQ(counter, 1) << "Should have got a notification that the signal has changed";
 
+  // Read the pending request to learn its correlationId
+  sd_bus_error err = SD_BUS_ERROR_NULL;
+  char* property_value = nullptr;
+  res = sd_bus_get_property_string(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::ConsentRequired, &err,
+                                   &property_value);
+  ASSERT_GE(res, 0) << "Get property call failed";
+  Json::Value consent_json = Utils::parseJSON(property_value);
+  std::string correlation_id = consent_json["correlationId"].asString();
+  EXPECT_FALSE(correlation_id.empty()) << "ConsentRequired should carry a correlationId";
+
   // Reject the install
   http->last_manifest.clear();
   sd_bus_message* reply = nullptr;
-  sd_bus_error err = SD_BUS_ERROR_NULL;
-  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::Consent, &err, &reply, "bs", 0,
-                           "I refuse.");
+  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::Consent, &err, &reply, "bss", 0,
+                           "I refuse.", correlation_id.c_str());
   ASSERT_GE(res, 0) << "Call failed";
   res = sd_bus_message_read(reply, "");
   sd_bus_message_unref(reply);
@@ -408,12 +417,12 @@ TEST_F(AktualizrDbus, DefaultIsNoConsent) {
 
   std::vector<Uptane::Target> install_targets;
   install_targets.push_back(Uptane::Target::Unknown());
-  auto consent_response = dut.GetConsent(install_targets);
+  auto consent_response = dut.GetConsent(install_targets, "corr-id-default");
 
   using namespace std::chrono_literals;
   ASSERT_EQ(consent_response.wait_for(1ms), std::future_status::ready) << "Consent result should be immediate";
 
-  EXPECT_TRUE(consent_response.get().granted) << "Consent should be granted by default";
+  EXPECT_TRUE(consent_response.get().granted()) << "Consent should be granted by default";
 }
 
 TEST_F(AktualizrDbus, ControlConsentOverDbus) {
@@ -469,7 +478,7 @@ TEST_F(AktualizrDbus, DbusRequestConsent) {
   //
   // Request Consent and get a notification callback
   //
-  auto consent_response = dut.GetConsent(install_targets);
+  auto consent_response = dut.GetConsent(install_targets, "corr-id-123");
 
   using namespace std::chrono_literals;
   ASSERT_EQ(consent_response.wait_for(1ms), std::future_status::timeout)
@@ -489,19 +498,35 @@ TEST_F(AktualizrDbus, DbusRequestConsent) {
 
   ASSERT_STRNE(property_value, "") << "Should now be asking for consent";
 
+  // The property should carry the correlationId that GetConsent was given
+  Json::Value consent_json = Utils::parseJSON(property_value);
+  EXPECT_EQ(consent_json["correlationId"].asString(), "corr-id-123");
+
+  //
+  // Replying with the wrong correlationId should be rejected and leave the
+  // request pending
+  //
+  sd_bus_message* reply = nullptr;
+  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::Consent, &err, &reply, "bss", 1,
+                           "stale response", "corr-id-STALE");
+  ASSERT_LT(res, 0) << "Call with mismatched correlationId should fail";
+  ASSERT_STREQ(err.name, "org.freedesktop.DBus.Error.InvalidArgs");
+  sd_bus_error_free(&err);
+  ASSERT_EQ(consent_response.wait_for(1ms), std::future_status::timeout)
+      << "A rejected response should leave the request pending";
+
   //
   // Reply on D-Bus
   //
-  sd_bus_message* reply = nullptr;
-  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::Consent, &err, &reply, "bs", 1,
-                           "test grant message");
+  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::Consent, &err, &reply, "bss", 1,
+                           "test grant message", "corr-id-123");
   ASSERT_GE(res, 0) << "Call failed";
   res = sd_bus_message_read(reply, "");
   sd_bus_message_unref(reply);
 
   // ..reply twice...
-  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::Consent, &err, &reply, "bs", 1,
-                           "repeat");
+  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::Consent, &err, &reply, "bss", 1,
+                           "repeat", "corr-id-123");
   ASSERT_EQ(res, -13) << "Call should return a failure";
   ASSERT_STREQ(err.name, "org.freedesktop.DBus.Error.Failed");
   sd_bus_error_free(&err);
@@ -513,8 +538,9 @@ TEST_F(AktualizrDbus, DbusRequestConsent) {
       << "Consent result should become available after responding over D-Bus";
 
   auto outcome = consent_response.get();
-  EXPECT_TRUE(outcome.granted);
+  EXPECT_TRUE(outcome.granted());
   EXPECT_EQ(outcome.reason, "test grant message");
+  EXPECT_EQ(outcome.correlation_id, "corr-id-123");
 
   //
   // Finally, the Consent Property should be empty
@@ -546,7 +572,7 @@ TEST_F(AktualizrDbus, PendingUpdateCancelled) {
   ASSERT_GE(res, 0) << "Adding match signal failed:" << res;
 
   // Ask for consent
-  auto consent_response = dut.GetConsent(install_targets);
+  auto consent_response = dut.GetConsent(install_targets, "corr-id-cancel");
 
   // pump the system bus to wait for the change notification
   for (int i = 0; (counter == 0) && (i < 100); i++) {
@@ -583,10 +609,216 @@ TEST_F(AktualizrDbus, PendingUpdateCancelled) {
   // Reply on D-Bus. This should be ignored but not crash
   //
   sd_bus_message* reply = nullptr;
-  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::Consent, &err, &reply, "bs", 1,
-                           "test grant message");
+  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::Consent, &err, &reply, "bss", 1,
+                           "test grant message", "corr-id-cancel");
   ASSERT_EQ(res, -13) << "Call should fail";
   sd_bus_error_free(&err);
+}
+
+/**
+ * A second GetConsent call supersedes the first: the old future resolves as
+ * kSuperseded, the property changes (with a signal), stale correlationIds are
+ * rejected, and the new offer can be consented to.
+ */
+TEST_F(AktualizrDbus, SupersededConsentRequest) {
+  StorageConfig config_storage;
+  config_storage.path = temp_dir_.Path();
+  auto storage = INvStorage::newStorage(config_storage);
+  storage->storeInstallUpdatesAutomatically(InstallUpdatesAutomatically::kAsk);
+  Dbus dut(std::move(dut_bus_), storage);
+
+  sd_bus_error err = SD_BUS_ERROR_NULL;
+
+  std::vector<Uptane::Target> install_targets;
+  install_targets.push_back(Uptane::Target::Unknown());
+
+  int counter = 0;
+  int res = sd_bus_match_signal(client_bus_, nullptr, nullptr, Dbus::Path, "org.freedesktop.DBus.Properties",
+                                "PropertiesChanged", bus_signal_callback, &counter);
+  ASSERT_GE(res, 0) << "Adding match signal failed:" << res;
+
+  auto first_response = dut.GetConsent(install_targets, "corr-id-A");
+  // Supersede it before anyone answers
+  auto second_response = dut.GetConsent(install_targets, "corr-id-B");
+
+  ASSERT_EQ(first_response.wait_for(100ms), future_status::ready)
+      << "Superseded consent future should resolve immediately";
+  auto first_outcome = first_response.get();
+  EXPECT_EQ(first_outcome.result, Consent::Outcome::Result::kSuperseded);
+  EXPECT_FALSE(first_outcome.granted());
+  EXPECT_EQ(first_outcome.correlation_id, "corr-id-A");
+
+  // Both transitions must emit PropertiesChanged
+  for (int i = 0; (counter < 2) && (i < 100); i++) {
+    int messages = sd_bus_process(client_bus_, nullptr);
+    ASSERT_GE(messages, 0) << "sd_bus_process got error" << -messages;
+    usleep(10'000);
+  }
+  EXPECT_EQ(counter, 2) << "Each GetConsent call should signal a property change";
+
+  // The property must now advertise the new offer
+  char* property_value = nullptr;
+  res = sd_bus_get_property_string(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::ConsentRequired, &err,
+                                   &property_value);
+  ASSERT_GE(res, 0) << "Get property call failed";
+  Json::Value consent_json = Utils::parseJSON(property_value);
+  EXPECT_EQ(consent_json["correlationId"].asString(), "corr-id-B");
+
+  // Answering the stale offer must be rejected and leave the new one pending
+  sd_bus_message* reply = nullptr;
+  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::Consent, &err, &reply, "bss", 1,
+                           "stale", "corr-id-A");
+  ASSERT_LT(res, 0) << "Stale correlationId should be rejected";
+  ASSERT_STREQ(err.name, "org.freedesktop.DBus.Error.InvalidArgs");
+  sd_bus_error_free(&err);
+  ASSERT_EQ(second_response.wait_for(1ms), std::future_status::timeout)
+      << "The new offer should still be pending after a stale response";
+
+  // Answering the current offer works
+  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::Consent, &err, &reply, "bss", 1,
+                           "ok", "corr-id-B");
+  ASSERT_GE(res, 0) << "Call failed";
+  sd_bus_message_unref(reply);
+  ASSERT_EQ(second_response.wait_for(1s), std::future_status::ready);
+  auto second_outcome = second_response.get();
+  EXPECT_TRUE(second_outcome.granted());
+  EXPECT_EQ(second_outcome.correlation_id, "corr-id-B");
+}
+
+/**
+ * If InstallUpdatesAutomatically flips to kProceed while an offer is pending,
+ * a subsequent GetConsent (e.g. supersession) must clear the stale pending
+ * request (with a property-change signal) instead of leaving it dangling.
+ */
+TEST_F(AktualizrDbus, ProceedFlipClearsPendingConsent) {
+  StorageConfig config_storage;
+  config_storage.path = temp_dir_.Path();
+  auto storage = INvStorage::newStorage(config_storage);
+  storage->storeInstallUpdatesAutomatically(InstallUpdatesAutomatically::kAsk);
+  Dbus dut(std::move(dut_bus_), storage);
+
+  sd_bus_error err = SD_BUS_ERROR_NULL;
+
+  std::vector<Uptane::Target> install_targets;
+  install_targets.push_back(Uptane::Target::Unknown());
+
+  auto first_response = dut.GetConsent(install_targets, "corr-id-A");
+  ASSERT_EQ(first_response.wait_for(1ms), std::future_status::timeout) << "Request should be pending";
+
+  // The user enables automatic updates while the prompt is showing
+  storage->storeInstallUpdatesAutomatically(InstallUpdatesAutomatically::kProceed);
+
+  int counter = 0;
+  int res = sd_bus_match_signal(client_bus_, nullptr, nullptr, Dbus::Path, "org.freedesktop.DBus.Properties",
+                                "PropertiesChanged", bus_signal_callback, &counter);
+  ASSERT_GE(res, 0) << "Adding match signal failed:" << res;
+
+  // e.g. a superseding update arrives; consent is now automatic
+  auto second_response = dut.GetConsent(install_targets, "corr-id-B");
+  ASSERT_EQ(second_response.wait_for(100ms), future_status::ready) << "kProceed consent should be immediate";
+  EXPECT_TRUE(second_response.get().granted());
+
+  // The stale request must have been resolved and cleared, with a signal
+  ASSERT_EQ(first_response.wait_for(100ms), future_status::ready);
+  EXPECT_EQ(first_response.get().result, Consent::Outcome::Result::kSuperseded);
+
+  for (int i = 0; (counter == 0) && (i < 100); i++) {
+    int messages = sd_bus_process(client_bus_, nullptr);
+    ASSERT_GE(messages, 0) << "sd_bus_process got error" << -messages;
+    usleep(10'000);
+  }
+  EXPECT_EQ(counter, 1) << "Clearing the stale offer should signal a property change";
+
+  char* property_value = nullptr;
+  res = sd_bus_get_property_string(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::ConsentRequired, &err,
+                                   &property_value);
+  ASSERT_GE(res, 0) << "Get property call failed";
+  ASSERT_STREQ(property_value, "") << "No stale offer should be advertised after the kProceed flip";
+}
+
+/**
+ * CheckForUpdates over D-Bus triggers an immediate peek while the device is
+ * waiting for consent (previously it only worked from idle).
+ */
+TEST_F(AktualizrDbus, CheckForUpdatesDuringConsent) {
+  auto http = std::make_shared<HttpFake>(temp_dir_.Path(), "hasupdates", fake_meta_dir);
+  Config conf = UptaneTestCommon::makeTestConfig(temp_dir_, http->tls_server);
+  conf.uptane.polling_sec = 600;
+
+  // Require consent
+  auto storage = INvStorage::newStorage(conf.storage);
+  storage->storeInstallUpdatesAutomatically(InstallUpdatesAutomatically::kAsk);
+
+  UptaneTestCommon::TestAktualizr aktualizr(conf, storage, http);
+  aktualizr.SetDbusInterface(std::move(dut_bus_));
+
+  struct CheckEvents {
+    std::mutex m;
+    std::condition_variable cv;
+    int update_checks{0};
+
+    void HandleEvent(const std::shared_ptr<event::BaseEvent>& event) {
+      if (event->variant == "UpdateCheckComplete") {
+        std::lock_guard<std::mutex> guard{m};
+        update_checks++;
+        cv.notify_all();
+      }
+    }
+  };
+  CheckEvents check_events;
+  auto conn = aktualizr.SetSignalHandler(std::bind(&CheckEvents::HandleEvent, &check_events, std::placeholders::_1));
+
+  aktualizr.Initialize();
+  auto ak_future = aktualizr.RunForever();
+
+  // Wait until we are waiting for consent
+  int counter = 0;
+  int res = sd_bus_match_signal(client_bus_, nullptr, nullptr, Dbus::Path, "org.freedesktop.DBus.Properties",
+                                "PropertiesChanged", bus_signal_callback, &counter);
+  ASSERT_GE(res, 0) << "Adding match signal failed:" << res;
+  for (int i = 0; (counter == 0) && (i < 200); i++) {
+    int messages = sd_bus_process(client_bus_, nullptr);
+    ASSERT_GE(messages, 0) << "sd_bus_process got error" << -messages;
+    usleep(100'000);
+  }
+  ASSERT_EQ(counter, 1) << "Should be waiting for consent";
+
+  int checks_at_prompt;
+  {
+    std::lock_guard<std::mutex> guard{check_events.m};
+    checks_at_prompt = check_events.update_checks;
+  }
+
+  // Nudge while waiting for consent; polling_sec is 600 so only the nudge can
+  // cause another check
+  sd_bus_error ret_error = SD_BUS_ERROR_NULL;
+  sd_bus_message* reply = nullptr;
+  res = sd_bus_call_method(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::CheckForUpdates, &ret_error,
+                           &reply, "");
+  ASSERT_GE(res, 0) << "Call failed";
+  sd_bus_message_unref(reply);
+
+  {
+    std::unique_lock guard{check_events.m};
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (check_events.update_checks < checks_at_prompt + 1) {
+      if (check_events.cv.wait_until(guard, deadline) == std::cv_status::timeout) {
+        aktualizr.Shutdown();
+        FAIL() << "Timed out waiting for the nudged update check during consent";
+      }
+    }
+  }
+
+  // Still waiting for consent (same offer): the property should be non-empty
+  sd_bus_error err = SD_BUS_ERROR_NULL;
+  char* property_value = nullptr;
+  res = sd_bus_get_property_string(client_bus_, bus_name_, Dbus::Path, Dbus::Interface, Dbus::ConsentRequired, &err,
+                                   &property_value);
+  ASSERT_GE(res, 0) << "Get property call failed";
+  EXPECT_STRNE(property_value, "") << "Consent should still be pending after a same-offer peek";
+
+  aktualizr.Shutdown();
+  ak_future.wait();
 }
 
 int main(int argc, char** argv) {

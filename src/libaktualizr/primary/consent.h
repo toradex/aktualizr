@@ -11,9 +11,26 @@
 class Consent {
  public:
   struct Outcome {
-    bool granted{false};
-    bool was_cancelled{false};
+    /**
+     * How the consent request was resolved.
+     * kSuperseded is only used when a consent request is replaced by a newer
+     * one (via a second GetConsent() call); the state machine swaps to the new
+     * future without reading the old one, so this value should never be acted
+     * upon. If it is ever observed, treat it as "do not install" and stay in
+     * the consent state (fail safe).
+     */
+    enum class Result {
+      kGranted,
+      kRefused,
+      kCancelled,
+      kSuperseded,
+    };
+    Result result{Result::kRefused};
     std::string reason;
+    /** Correlation ID of the update offer this outcome answers. */
+    std::string correlation_id;
+
+    [[nodiscard]] bool granted() const { return result == Result::kGranted; }
   };
   Consent() = default;
   Consent(const Consent&) = delete;
@@ -26,10 +43,14 @@ class Consent {
   /**
    * Check if it is OK to install \p targets.
    * When the user responds, the future will resolve.
-   * On the next call to either GetConsent or PendingUpdateCancelled, the future
-   * will be abandoned and .get() will throw std::future_errc::broken_promise,
+   * \p correlation_id identifies the update offer; it is exposed to the user
+   * (e.g. over D-Bus) and responses must reference it.
+   * If GetConsent() is called again while a request is outstanding, the old
+   * future resolves with Result::kSuperseded. If PendingUpdateCancelled() is
+   * called, it resolves with Result::kCancelled.
    */
-  virtual std::future<Outcome> GetConsent(const std::vector<Uptane::Target>& targets) = 0;
+  virtual std::future<Outcome> GetConsent(const std::vector<Uptane::Target>& targets,
+                                          const std::string& correlation_id) = 0;
 
   /**
    * Stop asking the user for Consent to install an update, perhaps to install
@@ -47,16 +68,16 @@ class Consent {
 class TrivialConsent : public Consent {
  public:
   TrivialConsent() = default;
-  std::future<Outcome> GetConsent(const std::vector<Uptane::Target>& /* targets */) override {
+  std::future<Outcome> GetConsent(const std::vector<Uptane::Target>& /* targets */,
+                                  const std::string& correlation_id) override {
     std::promise<Outcome> p;
-    p.set_value({true, false, "Granted Trivially"});
+    p.set_value({Outcome::Result::kGranted, "Granted Trivially", correlation_id});
     return p.get_future();
   }
 
   void PendingUpdateCancelled() override {
     // No-op since our implementation of GetConsent() will return a future that is already resolved
   }
-
 };
 
 #endif  // CONSENT_H_

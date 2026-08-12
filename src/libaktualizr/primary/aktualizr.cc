@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <fstream>
@@ -312,21 +313,109 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
           }
 
           peek_correlation_id_ = update_result_.correlation_id;
-          op_consent_ = consent_->GetConsent(update_result_.updates);
-          uptane_client_->reportAwaitingConsent();
+          op_consent_ = consent_->GetConsent(update_result_.updates, peek_correlation_id_);
+          uptane_client_->reportAwaitingConsent(peek_correlation_id_);
           state_ = UpdateCycleState::kGetConsent;
         }
         break;
       case UpdateCycleState::kGetConsent:
-        if (op_consent_.wait_until(next_offline_poll_) == std::future_status::ready) {
+        // This state multiplexes three wake sources: the consent future, an
+        // in-flight peek fetch (op_update_check_) and the CheckForUpdates
+        // nudge (exit_cond_). C++ futures cannot be waited on jointly, so we
+        // tick roughly once per second. Deliberately not paced by
+        // next_offline_poll_: that is decades away when offline updates are
+        // disabled at runtime.
+        if (op_consent_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+          // If a completed peek already superseded or withdrew the offer, then
+          // the consent response answers a stale offer: the D-Bus
+          // correlationId validation cannot reject a response that arrived
+          // after the peek completed but before this loop processed it.
+          // Supersession wins: discard the stale response (no ConsentOutcome,
+          // no failure manifest) and handle the peek result instead.
+          result::UpdateCheck completed_peek;
+          bool peek_completed = false;
+          if (op_update_check_.valid() &&
+              op_update_check_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            completed_peek = op_update_check_.get();
+            peek_completed = true;
+          }
+          const bool offer_changed =
+              peek_completed && ((completed_peek.status == result::UpdateStatus::kUpdatesAvailable &&
+                                  completed_peek.correlation_id != peek_correlation_id_) ||
+                                 completed_peek.status == result::UpdateStatus::kNoUpdatesAvailable);
           last_consent_outcome_ = op_consent_.get();
-          uptane_client_->reportConsentOutcome(last_consent_outcome_);
-          if (last_consent_outcome_.was_cancelled) {
-            LOG_INFO << "Install cancelled while waiting for consent";
-            state_ = UpdateCycleState::kIdle;
+          if (offer_changed && (last_consent_outcome_.result == Consent::Outcome::Result::kGranted ||
+                                last_consent_outcome_.result == Consent::Outcome::Result::kRefused)) {
+            // An explicit cancellation is exempt: the user asked to stop, so
+            // honor it below rather than immediately re-prompting.
+            LOG_INFO << "Consent response for " << peek_correlation_id_
+                     << " raced with a change of the offered update. Discarding the response.";
+            HandleConsentPeekResult(completed_peek);
+            break;
+          }
+          switch (last_consent_outcome_.result) {
+            case Consent::Outcome::Result::kCancelled:
+              LOG_INFO << "Install cancelled while waiting for consent";
+              uptane_client_->reportConsentOutcome(last_consent_outcome_, peek_correlation_id_);
+              StoreInstallationFailure(data::InstallationResult(data::ResultCode::Numeric::kOperationCancelled,
+                                                                last_consent_outcome_.reason),
+                                       peek_correlation_id_);
+              // Send a failure manifest so the server can mark the update as cancelled.
+              op_put_manifest_ = SendManifest();
+              state_ = UpdateCycleState::kSendingManifest;
+              break;
+            case Consent::Outcome::Result::kSuperseded:
+            default:
+              // Not reachable by construction: on supersession we swap
+              // op_consent_ for the new future without reading the old one.
+              // Fail safe: return to idle; the next poll re-prompts.
+              LOG_ERROR << "Internal error: observed a superseded consent outcome";
+              state_ = UpdateCycleState::kIdle;
+              break;
+            case Consent::Outcome::Result::kGranted:
+            case Consent::Outcome::Result::kRefused:
+              if (last_consent_outcome_.correlation_id != peek_correlation_id_) {
+                // Defense in depth behind the D-Bus correlationId validation:
+                // never commit an offer other than the one we are holding.
+                LOG_ERROR << "Internal error: consent outcome is for correlation ID '"
+                          << last_consent_outcome_.correlation_id << "' but the pending offer is '"
+                          << peek_correlation_id_ << "'. Discarding the response.";
+                state_ = UpdateCycleState::kIdle;
+                break;
+              }
+              uptane_client_->reportConsentOutcome(last_consent_outcome_, peek_correlation_id_);
+              op_update_check_ = CommitUpdate(peek_correlation_id_);
+              state_ = UpdateCycleState::kConfirmingUpdate;
+              break;
+          }
+        } else if (op_update_check_.valid() &&
+                   op_update_check_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+          HandleConsentPeekResult(op_update_check_.get());
+        } else {
+          bool check_now = false;
+          {
+            std::lock_guard<std::mutex> const lock{exit_cond_.m};
+            if (exit_cond_.check_for_updates_now) {
+              LOG_INFO << "CheckForUpdates requested while waiting for consent";
+              exit_cond_.check_for_updates_now = false;
+              check_now = true;
+            }
+          }
+          if (!op_update_check_.valid() && config_.uptane.enable_online_updates &&
+              (check_now || next_online_poll_ <= now)) {
+            // Keep peek-polling for updates while we wait for consent, so a
+            // newer update can supersede the pending offer.
+            next_online_poll_ = now + std::chrono::seconds(config_.uptane.polling_sec);
+            if (check_now) {
+              next_check_reason_ = CheckReason::kDbusWake;
+            }
+            op_update_check_ = CheckUpdatesPeek(next_check_reason_);
+            next_check_reason_ = CheckReason::kPoll;
           } else {
-            op_update_check_ = CommitUpdate(peek_correlation_id_);
-            state_ = UpdateCycleState::kConfirmingUpdate;
+            // Bounded tick (~1s) so we notice peek completion and
+            // CheckForUpdates promptly while still blocking on consent.
+            auto next_wake_up = std::min({next_offline_poll_, next_online_poll_, now + std::chrono::seconds(1)});
+            op_consent_.wait_until(next_wake_up);
           }
         }
         break;
@@ -334,10 +423,11 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
         if (op_update_check_.wait_until(next_offline_poll_) == std::future_status::ready) {
           auto confirm_result = op_update_check_.get();
 
-          if (!last_consent_outcome_.granted) {
+          if (!last_consent_outcome_.granted()) {
             LOG_WARNING << "User refused consent of update: " << last_consent_outcome_.reason;
             StoreInstallationFailure(
-                data::InstallationResult(data::ResultCode::Numeric::kConsentRefused, last_consent_outcome_.reason));
+                data::InstallationResult(data::ResultCode::Numeric::kConsentRefused, last_consent_outcome_.reason),
+                peek_correlation_id_);
             op_put_manifest_ = SendManifest();
             state_ = UpdateCycleState::kSendingManifest;
           } else if (confirm_result.status == result::UpdateStatus::kUpdatesAvailable) {
@@ -348,7 +438,8 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
             LOG_WARNING << "Update changed or was cancelled after consent: " << confirm_result.message;
             if (confirm_result.status == result::UpdateStatus::kError) {
               StoreInstallationFailure(
-                  data::InstallationResult(data::ResultCode::Numeric::kInternalError, confirm_result.message));
+                  data::InstallationResult(data::ResultCode::Numeric::kInternalError, confirm_result.message),
+                  peek_correlation_id_);
               op_put_manifest_ = SendManifest();
               state_ = UpdateCycleState::kSendingManifest;
             } else {
@@ -469,6 +560,49 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
   return ExitReason::kStopRequested;
 }
 
+void Aktualizr::HandleConsentPeekResult(const result::UpdateCheck &peek) {
+  switch (peek.status) {
+    case result::UpdateStatus::kUpdatesAvailable:
+      if (peek.correlation_id == peek_correlation_id_) {
+        // Same offer as the one we are already asking about.
+        return;
+      }
+      if (update_lock_file_.ShouldUpdate() == UpdateLockFile::kNoUpdate) {
+        // Updates got locked since the original offer; drop the pending
+        // prompt. Once the lock is released a normal poll will re-prompt.
+        LOG_INFO << "Updates are locked; withdrawing the pending consent request";
+        consent_->PendingUpdateCancelled();
+        state_ = UpdateCycleState::kIdle;
+        return;
+      }
+      LOG_INFO << "Update offer changed while waiting for consent (" << peek_correlation_id_ << " -> "
+               << peek.correlation_id << "). Superseding the pending consent request.";
+      update_result_ = peek;
+      peek_correlation_id_ = peek.correlation_id;
+      // This resolves the previous consent future as kSuperseded inside the
+      // Consent implementation; we swap to the new future without reading the
+      // old one.
+      op_consent_ = consent_->GetConsent(update_result_.updates, peek_correlation_id_);
+      uptane_client_->reportAwaitingConsent(peek_correlation_id_);
+      // Remain in kGetConsent. The user never decided on the old offer, so no
+      // ConsentOutcome is reported for it.
+      break;
+    case result::UpdateStatus::kNoUpdatesAvailable:
+      LOG_INFO << "Update offer was withdrawn on the server while waiting for consent";
+      consent_->PendingUpdateCancelled();
+      // The consent future resolves as kCancelled but we return to idle
+      // without reading it: the user never decided, so no ConsentOutcome.
+      state_ = UpdateCycleState::kIdle;
+      break;
+    case result::UpdateStatus::kError:
+    default:
+      // Transient failure (connectivity tracking already happens in
+      // fetchMeta). Keep the pending offer; retry at the next poll.
+      LOG_WARNING << "Update check failed while waiting for consent: " << peek.message;
+      break;
+  }
+}
+
 void Aktualizr::Shutdown() {
   std::lock_guard<std::mutex> const guard{exit_cond_.m};
   exit_cond_.run_mode = RunMode::kStop;
@@ -567,8 +701,9 @@ std::future<result::Install> Aktualizr::Install(const std::vector<Uptane::Target
           data::InstallationResult(false, data::ResultCode::Numeric::kOperationCancelled, "Operation Cancelled"), {}));
 }
 
-void Aktualizr::StoreInstallationFailure(const data::InstallationResult &result) {
-  std::function<void()> task([this, result] { uptane_client_->storeInstallationFailure(result); });
+void Aktualizr::StoreInstallationFailure(const data::InstallationResult &result, const std::string &correlation_id) {
+  std::function<void()> task(
+      [this, result, correlation_id] { uptane_client_->storeInstallationFailure(result, correlation_id); });
   api_queue_->enqueue(std::move(task));
 }
 
