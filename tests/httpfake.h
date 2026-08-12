@@ -50,7 +50,8 @@ class HttpFake : public HttpInterface {
   }
 
   using HttpInterface::get;
-  HttpResponse get(const std::string &url, int64_t maxsize, const api::FlowControlToken *flow_control) override;
+  HttpResponse get(const std::string &url, int64_t maxsize, const api::FlowControlToken *flow_control,
+                   const Headers *extra_headers) override;
 
   HttpResponse post(const std::string &url, const std::string &content_type, const std::string &data) override {
     (void)url;

@@ -33,7 +33,9 @@ class HttpClient : public HttpInterface {
   HttpClient(HttpClient &&) = delete;
   HttpClient &operator=(const HttpClient &) = delete;
   HttpClient &operator=(HttpClient &&) = delete;
-  HttpResponse get(const std::string &url, int64_t maxsize, const api::FlowControlToken *flow_control) override;
+  using HttpInterface::get;
+  HttpResponse get(const std::string &url, int64_t maxsize, const api::FlowControlToken *flow_control,
+                   const Headers *extra_headers) override;
   std::string getEffectiveUrl(const std::string &url) override;
   HttpResponse post(const std::string &url, const std::string &content_type, const std::string &data) override;
   HttpResponse post(const std::string &url, const Json::Value &data) override;

@@ -83,7 +83,8 @@ class SotaUptaneClient {
   void reportAwaitingConsent();
   void reportConsentOutcome(const Consent::Outcome &consent_outcome);
   void sendDeviceData();
-  result::UpdateCheck fetchMeta(CheckReason check_reason = CheckReason::kUnknown);
+  result::UpdateCheck fetchMeta(bool peek = false, const std::string &expected_correlation_id = "",
+                                CheckReason check_reason = CheckReason::kUnknown);
   result::PutManifestResult putManifest(const Json::Value &custom = Json::nullValue);
   result::Install uptaneInstall(const std::vector<Uptane::Target> &updates, UpdateType utype = UpdateType::kOnline);
   result::CampaignCheck campaignCheck();
@@ -152,11 +153,12 @@ class SotaUptaneClient {
    */
   void requiresAlreadyProvisioned();
 
-  result::UpdateCheck checkUpdates(UpdateType utype = UpdateType::kOnline);
+  result::UpdateCheck checkUpdates(UpdateType utype = UpdateType::kOnline, bool peek = false,
+                                   const std::string &expected_correlation_id = "");
   result::UpdateStatus checkUpdatesOffline(const std::vector<Uptane::Target> &targets,
                                            UpdateType utype = UpdateType::kOnline);
   void uptaneIteration(std::vector<Uptane::Target> *targets, unsigned int *ecus_count,
-                       UpdateType utype = UpdateType::kOnline);
+                       UpdateType utype = UpdateType::kOnline, bool peek = false);
   void uptaneOfflineIteration(std::vector<Uptane::Target> *targets, unsigned int *ecus_count,
                               UpdateType utype = UpdateType::kOnline);
 
@@ -191,7 +193,7 @@ class SotaUptaneClient {
   result::PutManifestResult putManifestSimple(const Json::Value &custom = Json::nullValue,
                                               CheckReason = CheckReason::kUnknown);
   void getNewTargets(std::vector<Uptane::Target> *new_targets, unsigned int *ecus_count = nullptr);
-  void updateDirectorMeta(UpdateType utype = UpdateType::kOnline);
+  void updateDirectorMeta(UpdateType utype = UpdateType::kOnline, bool peek = false);
   void updateImageMeta(UpdateType utype = UpdateType::kOnline);
   void checkDirectorMetaOffline(UpdateType utype = UpdateType::kOnline);
   void checkImageMetaOffline(UpdateType utype = UpdateType::kOnline);

@@ -23,8 +23,8 @@
 
 class HttpFakeOnlineLogs : public HttpInterface {
  public:
-  HttpResponse get(const std::string& /*url*/, int64_t /*maxsize*/,
-                   const api::FlowControlToken* /*flow_control*/) override {
+  HttpResponse get(const std::string& /*url*/, int64_t /*maxsize*/, const api::FlowControlToken* /*flow_control*/,
+                   const Headers* /*extra_headers*/) override {
     return HttpResponse("", 200, CURLE_OK, "");
   }
 

@@ -56,6 +56,7 @@ class TrivialConsent : public Consent {
   void PendingUpdateCancelled() override {
     // No-op since our implementation of GetConsent() will return a future that is already resolved
   }
+
 };
 
 #endif  // CONSENT_H_

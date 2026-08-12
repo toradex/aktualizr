@@ -158,8 +158,16 @@ void HttpClient::setCerts(const std::string& ca, CryptoSource ca_source, const s
   pkcs11_key = (pkey_source == CryptoSource::kPkcs11);
 }
 
-HttpResponse HttpClient::get(const std::string& url, int64_t maxsize, const api::FlowControlToken* flow_control) {
+HttpResponse HttpClient::get(const std::string& url, int64_t maxsize, const api::FlowControlToken* flow_control,
+                             const Headers* extra_headers) {
   auto curl_get = dupCurl();
+  if (extra_headers != nullptr) {
+    for (const auto& header : *extra_headers) {
+      curl_get.appendHeader(header);
+    }
+    // appendHeader may update the list head; keep CURLOPT_HTTPHEADER in sync.
+    curl_get.setopt(CURLOPT_HTTPHEADER, curl_get.headers());
+  }
 
   // Clear POSTFIELDS to remove any lingering references to strings that have
   // probably since been deallocated.

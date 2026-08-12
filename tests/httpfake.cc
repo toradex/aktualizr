@@ -37,8 +37,9 @@ bool HttpFake::rewrite(std::string &url, const std::string &pattern) const {
   return true;
 }
 
-HttpResponse HttpFake::get(const std::string &url, int64_t maxsize,
-                           const api::FlowControlToken *flow_control) {
+HttpResponse HttpFake::get(const std::string &url, int64_t maxsize, const api::FlowControlToken *flow_control,
+                           const Headers *extra_headers) {
+    (void)extra_headers;
     (void)maxsize;
     std::cout << "URL requested: " << url << "\n";
 

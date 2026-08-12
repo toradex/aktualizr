@@ -108,6 +108,9 @@ std::ostream &operator<<(std::ostream &os, Aktualizr::UpdateCycleState state) {
     case Aktualizr::UpdateCycleState::kGetConsent:
       os << "GetConsent";
       break;
+    case Aktualizr::UpdateCycleState::kConfirmingUpdate:
+      os << "ConfirmingUpdate";
+      break;
     case Aktualizr::UpdateCycleState::kDownloading:
       os << "Downloading";
       break;
@@ -172,6 +175,7 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
         case UpdateCycleState::kSendingManifest:
         case UpdateCycleState::kCheckingForUpdates:
         case UpdateCycleState::kGetConsent:
+        case UpdateCycleState::kConfirmingUpdate:
         case UpdateCycleState::kDownloading:
         case UpdateCycleState::kInstalling:
           // In these cases we need to poll for Offline updates
@@ -242,7 +246,7 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
             state_ = UpdateCycleState::kIdle;
             break;
           }
-          op_update_check_ = CheckUpdates(next_check_reason_);
+          op_update_check_ = CheckUpdatesPeek(next_check_reason_);
           next_check_reason_ = CheckReason::kPoll;
           state_ = UpdateCycleState::kCheckingForUpdates;
         } else {
@@ -306,7 +310,8 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
             state_ = UpdateCycleState::kIdle;
             break;
           }
-          // Got an update
+
+          peek_correlation_id_ = update_result_.correlation_id;
           op_consent_ = consent_->GetConsent(update_result_.updates);
           uptane_client_->reportAwaitingConsent();
           state_ = UpdateCycleState::kGetConsent;
@@ -314,26 +319,41 @@ Aktualizr::ExitReason Aktualizr::RunUpdateLoop() {
         break;
       case UpdateCycleState::kGetConsent:
         if (op_consent_.wait_until(next_offline_poll_) == std::future_status::ready) {
-          auto consent = op_consent_.get();
-          uptane_client_->reportConsentOutcome(consent);
-          if (consent.granted) {
+          last_consent_outcome_ = op_consent_.get();
+          uptane_client_->reportConsentOutcome(last_consent_outcome_);
+          if (last_consent_outcome_.was_cancelled) {
+            LOG_INFO << "Install cancelled while waiting for consent";
+            state_ = UpdateCycleState::kIdle;
+          } else {
+            op_update_check_ = CommitUpdate(peek_correlation_id_);
+            state_ = UpdateCycleState::kConfirmingUpdate;
+          }
+        }
+        break;
+      case UpdateCycleState::kConfirmingUpdate:
+        if (op_update_check_.wait_until(next_offline_poll_) == std::future_status::ready) {
+          auto confirm_result = op_update_check_.get();
+
+          if (!last_consent_outcome_.granted) {
+            LOG_WARNING << "User refused consent of update: " << last_consent_outcome_.reason;
+            StoreInstallationFailure(
+                data::InstallationResult(data::ResultCode::Numeric::kConsentRefused, last_consent_outcome_.reason));
+            op_put_manifest_ = SendManifest();
+            state_ = UpdateCycleState::kSendingManifest;
+          } else if (confirm_result.status == result::UpdateStatus::kUpdatesAvailable) {
+            update_result_ = confirm_result;
             op_download_ = Download(update_result_.updates);
             state_ = UpdateCycleState::kDownloading;
           } else {
-            data::ResultCode::Numeric result_code;
-            if (consent.was_cancelled) {
-              LOG_INFO << "Install cancelled while waiting for consent";
-              result_code = data::ResultCode::Numeric::kOperationCancelled;
+            LOG_WARNING << "Update changed or was cancelled after consent: " << confirm_result.message;
+            if (confirm_result.status == result::UpdateStatus::kError) {
+              StoreInstallationFailure(
+                  data::InstallationResult(data::ResultCode::Numeric::kInternalError, confirm_result.message));
+              op_put_manifest_ = SendManifest();
+              state_ = UpdateCycleState::kSendingManifest;
             } else {
-              LOG_WARNING << "User refused consent of update: " << consent.reason;
-              result_code = data::ResultCode::Numeric::kConsentRefused;
+              state_ = UpdateCycleState::kIdle;
             }
-            data::InstallationResult failure_result(result_code, consent.reason);
-            StoreInstallationFailure(failure_result);
-            // This sends the manifest in the cancelled case. It isn't clear if
-            // this is the 'right' thing to do or not.
-            SendManifest();
-            state_ = UpdateCycleState::kIdle;
           }
         }
         break;
@@ -515,7 +535,20 @@ std::future<void> Aktualizr::SendDeviceData(const Json::Value &hwinfo) {
 }
 
 std::future<result::UpdateCheck> Aktualizr::CheckUpdates(CheckReason check_reason) {
-  std::function<result::UpdateCheck()> task([this, check_reason] { return uptane_client_->fetchMeta(check_reason); });
+  std::function<result::UpdateCheck()> task(
+      [this, check_reason] { return uptane_client_->fetchMeta(/*peek=*/false, "", check_reason); });
+  return api_queue_->enqueue(std::move(task), result::UpdateCheck());
+}
+
+std::future<result::UpdateCheck> Aktualizr::CheckUpdatesPeek(CheckReason check_reason) {
+  std::function<result::UpdateCheck()> task(
+      [this, check_reason] { return uptane_client_->fetchMeta(/*peek=*/true, "", check_reason); });
+  return api_queue_->enqueue(std::move(task), result::UpdateCheck());
+}
+
+std::future<result::UpdateCheck> Aktualizr::CommitUpdate(const std::string &correlation_id) {
+  std::function<result::UpdateCheck()> task(
+      [this, correlation_id] { return uptane_client_->fetchMeta(/*peek=*/false, correlation_id); });
   return api_queue_->enqueue(std::move(task), result::UpdateCheck());
 }
 

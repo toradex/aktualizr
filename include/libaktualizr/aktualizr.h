@@ -154,6 +154,8 @@ class Aktualizr {
    * @throw SotaUptaneClient::ProvisioningFailed (on-line provisioning failed)
    */
   std::future<result::UpdateCheck> CheckUpdates(CheckReason check_reason = CheckReason::kUnknown);
+  std::future<result::UpdateCheck> CheckUpdatesPeek(CheckReason check_reason = CheckReason::kUnknown);
+  std::future<result::UpdateCheck> CommitUpdate(const std::string &correlation_id);
 
   /**
    * Download targets.
@@ -421,6 +423,8 @@ class Aktualizr {
     kCheckingForUpdates,
     /** We are waiting for user consent to install an update */
     kGetConsent,
+    /** We performed a commit fetch after consent was granted or refused, and are verifying targets. */
+    kConfirmingUpdate,
     /** We are downloading an update, and are waiting for it to complete.*/
     kDownloading,
     /** We are installing an update, and are waiting for it to complete. */
@@ -513,6 +517,8 @@ class Aktualizr {
 
   UpdateLockFile update_lock_file_;
   std::unique_ptr<Consent> consent_{std::make_unique<TrivialConsent>()};
+  std::string peek_correlation_id_;
+  Consent::Outcome last_consent_outcome_;
 };
 
 #endif  // AKTUALIZR_H_

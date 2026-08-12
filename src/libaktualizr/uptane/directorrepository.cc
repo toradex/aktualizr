@@ -104,6 +104,11 @@ void DirectorRepository::checkMetaOffline(INvStorage& storage) {
 
 void DirectorRepository::updateMeta(INvStorage& storage, const IMetadataFetcher& fetcher,
                                     const api::FlowControlToken* flow_control) {
+  updateMeta(storage, fetcher, flow_control, false);
+}
+
+void DirectorRepository::updateMeta(INvStorage& storage, const IMetadataFetcher& fetcher,
+                                    const api::FlowControlToken* flow_control, bool peek) {
   // Uptane step 2 (download time) is not implemented yet.
   // Uptane step 3 (download metadata)
 
@@ -119,9 +124,10 @@ void DirectorRepository::updateMeta(INvStorage& storage, const IMetadataFetcher&
   // Update Director Targets Metadata
   {
     std::string director_targets;
+    const HttpInterface::Headers peek_headers = {"x-trx-mark-seen: false"};
 
     fetcher.fetchLatestRole(&director_targets, kMaxDirectorTargetsSize, RepositoryType::Director(), Role::Targets(),
-                            flow_control);
+                            flow_control, peek ? &peek_headers : nullptr);
     int remote_version = extractVersionUntrusted(director_targets);
 
     int local_version;
@@ -144,7 +150,7 @@ void DirectorRepository::updateMeta(INvStorage& storage, const IMetadataFetcher&
     // the database, which can cause some minor confusion.
     if (local_version > remote_version) {
       throw Uptane::SecurityException(RepositoryType::Director(), "Rollback attempt");
-    } else if (local_version < remote_version && !targets.targets.empty()) {
+    } else if (!peek && local_version < remote_version && !targets.targets.empty()) {
       storage.storeNonRoot(director_targets, RepositoryType::Director(), Role::Targets());
     }
 

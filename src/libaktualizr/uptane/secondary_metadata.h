@@ -10,8 +10,9 @@ class SecondaryMetadata : public IMetadataFetcher {
  public:
   explicit SecondaryMetadata(MetaBundle meta_bundle_in);
 
+  using IMetadataFetcher::fetchRole;
   void fetchRole(std::string* result, int64_t maxsize, RepositoryType repo, const Role& role, Version version,
-                 const api::FlowControlToken* flow_control) const override;
+                 const api::FlowControlToken* flow_control, const HttpInterface::Headers* extra_headers) const override;
 
   /**
    * We are fetching from the primary, which is inside one device. We assume

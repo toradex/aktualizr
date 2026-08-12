@@ -47,6 +47,7 @@ class UpdateCheck {
   unsigned int ecus_count{0};
   UpdateStatus status{UpdateStatus::kNoUpdatesAvailable};
   std::string message;
+  std::string correlation_id;
 };
 
 /**

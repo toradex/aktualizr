@@ -506,11 +506,9 @@ void SotaUptaneClient::requiresAlreadyProvisioned() {
   }
 }
 
-void SotaUptaneClient::updateDirectorMeta(UpdateType utype) {
+void SotaUptaneClient::updateDirectorMeta(UpdateType utype, bool peek) {
   try {
     if (utype == UpdateType::kOffline) {
-      // Use the offline-update logic with a fetcher that knows about the
-      // organization of the offline-update image.
 #ifdef BUILD_OFFLINE_UPDATES
       director_repo.updateMetaOffUpd(*storage, *uptane_fetcher_offupd);
 #else
@@ -518,7 +516,7 @@ void SotaUptaneClient::updateDirectorMeta(UpdateType utype) {
 #endif
     } else {
       requiresProvision();
-      director_repo.updateMeta(*storage, *uptane_fetcher, flow_control_);
+      director_repo.updateMeta(*storage, *uptane_fetcher, flow_control_, peek);
     }
   } catch (const std::exception &e) {
     LOG_ERROR << "Director metadata update failed: " << e.what();
@@ -997,9 +995,9 @@ std::pair<bool, Uptane::Target> SotaUptaneClient::downloadImage(const Uptane::Ta
   return {success, target};
 }
 
-void SotaUptaneClient::uptaneIteration(std::vector<Uptane::Target> *targets, unsigned int *ecus_count,
-                                       UpdateType utype) {
-  updateDirectorMeta(utype);
+void SotaUptaneClient::uptaneIteration(std::vector<Uptane::Target> *targets, unsigned int *ecus_count, UpdateType utype,
+                                       bool peek) {
+  updateDirectorMeta(utype, peek);
   if (flow_control_ != nullptr && flow_control_->hasAborted()) {
     return;
   }
@@ -1063,7 +1061,8 @@ void SotaUptaneClient::sendDeviceData() {
   sendEvent<event::SendDeviceDataComplete>();
 }
 
-result::UpdateCheck SotaUptaneClient::fetchMeta(CheckReason check_reason) {
+result::UpdateCheck SotaUptaneClient::fetchMeta(bool peek, const std::string &expected_correlation_id,
+                                                CheckReason check_reason) {
   requiresProvision();
 
   reportNetworkInfo();
@@ -1081,20 +1080,37 @@ result::UpdateCheck SotaUptaneClient::fetchMeta(CheckReason check_reason) {
     return {{}, 0, result::UpdateStatus::kError, "There are pending updates, no new updates are checked"};
   }
 
-  // Uptane step 1 (build the vehicle version manifest):
-  if (!putManifestSimple(Json::nullValue, check_reason).success()) {
-    LOG_ERROR << "Error sending manifest!";
+  // Uptane step 1 (build the vehicle version manifest)
+  // Skip on commit confirmation (expected_correlation_id set): the preceding
+  // peek already uploaded the manifest, and regenerating it is potentially
+  // expensive (remote secondaries especially). Discovery fetches (peeks and
+  // the public CheckUpdates() path) still send it. If the manifest would have
+  // changed between peek and commit, the update cycle is aborted and we peek
+  // again.
+  if (expected_correlation_id.empty()) {
+    if (!putManifestSimple(Json::nullValue, check_reason).success()) {
+      LOG_ERROR << "Error sending manifest!";
+    }
   }
-  auto result = checkUpdates();
+  auto result = checkUpdates(UpdateType::kOnline, peek, expected_correlation_id);
+  if (result.status == result::UpdateStatus::kError) {
+    connected_ = false;
+  } else {
+    if (!connected_) {
+      LOG_INFO << "Connectivity is restored.";
+    }
+    connected_ = true;
+  }
   sendEvent<event::UpdateCheckComplete>(result);
   return result;
 }
 
-result::UpdateCheck SotaUptaneClient::checkUpdates(UpdateType utype) {
+result::UpdateCheck SotaUptaneClient::checkUpdates(UpdateType utype, bool peek,
+                                                   const std::string &expected_correlation_id) {
   std::vector<Uptane::Target> updates;
   unsigned int ecus_count = 0;
   try {
-    uptaneIteration(&updates, &ecus_count, utype);
+    uptaneIteration(&updates, &ecus_count, utype, peek);
   } catch (const Uptane::Exception &e) {
     // TODO: Consider using this check throughout sotauptaneclient for more consistent exception handling.
     if (e.getPersistence() == Uptane::Persistence::kPermanent && utype == UpdateType::kOnline) {
@@ -1110,8 +1126,21 @@ result::UpdateCheck SotaUptaneClient::checkUpdates(UpdateType utype) {
   }
 
   if (updates.empty()) {
+    if (!expected_correlation_id.empty()) {
+      LOG_INFO << "No updates available on commit fetch (update may have been cancelled on server).";
+      return {{}, 0, result::UpdateStatus::kNoUpdatesAvailable, "Update cancelled on server."};
+    }
     LOG_DEBUG << "No new updates found in Uptane metadata.";
     return {{}, 0, result::UpdateStatus::kNoUpdatesAvailable, ""};
+  }
+
+  if (!expected_correlation_id.empty()) {
+    auto actual_correlation_id = director_repo.getCorrelationId();
+    if (actual_correlation_id != expected_correlation_id) {
+      LOG_ERROR << "Correlation ID mismatch: expected " << expected_correlation_id << " but got "
+                << actual_correlation_id;
+      return {{}, 0, result::UpdateStatus::kError, "Update changed between peek and commit (correlation ID mismatch)."};
+    }
   }
 
   // 5.4.4.2.10.: Verify that Targets metadata from the Director and Image
@@ -1119,6 +1148,8 @@ result::UpdateCheck SotaUptaneClient::checkUpdates(UpdateType utype) {
   // all images listed in the Targets metadata file from the Director
   // repository.
   // PURE-2 step 9
+  // Also done on peek so ConsentRequired carries merged Image-repo custom data
+  // (version strings, release notes, etc.).
   try {
     for (auto &target : updates) {
       auto image_target = findTargetInDelegationTree(target, false, utype);
@@ -1149,7 +1180,10 @@ result::UpdateCheck SotaUptaneClient::checkUpdates(UpdateType utype) {
   } else {
     LOG_INFO << updates.size() << " new updates found in both Director and Image repo metadata.";
   }
-  return {updates, ecus_count, result::UpdateStatus::kUpdatesAvailable, ""};
+
+  result::UpdateCheck result{updates, ecus_count, result::UpdateStatus::kUpdatesAvailable, ""};
+  result.correlation_id = director_repo.getCorrelationId();
+  return result;
 }
 
 result::UpdateStatus SotaUptaneClient::checkUpdatesOffline(const std::vector<Uptane::Target> &targets,

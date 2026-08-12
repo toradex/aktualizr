@@ -38,16 +38,23 @@ class IMetadataFetcher {
    * @throws Uptane::LocallyAborted If the caller aborts with flow_control->hasAborted()
    */
   virtual void fetchRole(std::string* result, int64_t maxsize, RepositoryType repo, const Uptane::Role& role,
-                         Version version, const api::FlowControlToken* flow_control) const = 0;
+                         Version version, const api::FlowControlToken* flow_control,
+                         const HttpInterface::Headers* extra_headers) const = 0;
 
   void fetchRole(std::string* result, int64_t maxsize, RepositoryType repo, const Uptane::Role& role,
                  Version version) const {
-    fetchRole(result, maxsize, repo, role, version, nullptr);
+    fetchRole(result, maxsize, repo, role, version, nullptr, nullptr);
+  }
+
+  void fetchRole(std::string* result, int64_t maxsize, RepositoryType repo, const Uptane::Role& role, Version version,
+                 const api::FlowControlToken* flow_control) const {
+    fetchRole(result, maxsize, repo, role, version, flow_control, nullptr);
   }
 
   void fetchLatestRole(std::string* result, int64_t maxsize, RepositoryType repo, const Uptane::Role& role,
-                       const api::FlowControlToken* flow_control = nullptr) const {
-    fetchRole(result, maxsize, repo, role, Version(), flow_control);
+                       const api::FlowControlToken* flow_control = nullptr,
+                       const HttpInterface::Headers* extra_headers = nullptr) const {
+    fetchRole(result, maxsize, repo, role, Version(), flow_control, extra_headers);
   }
 
   /**
@@ -70,8 +77,9 @@ class Fetcher : public IMetadataFetcher {
       : http(std::move(http_in)),
         repo_server(std::move(repo_server_in)),
         director_server(std::move(director_server_in)) {}
+  using IMetadataFetcher::fetchRole;
   void fetchRole(std::string* result, int64_t maxsize, RepositoryType repo, const Uptane::Role& role, Version version,
-                 const api::FlowControlToken* flow_control) const override;
+                 const api::FlowControlToken* flow_control, const HttpInterface::Headers* extra_headers) const override;
 
   [[nodiscard]] std::string getRepoServer() const { return repo_server; }
 
@@ -95,8 +103,9 @@ class OfflineUpdateFetcher : public IMetadataFetcher {
       throw std::runtime_error("Source path for offline-updates is not defined");
     }
   }
+  using IMetadataFetcher::fetchRole;
   void fetchRole(std::string* result, int64_t maxsize, RepositoryType repo, const Uptane::Role& role, Version version,
-                 const api::FlowControlToken* flow_control) const override;
+                 const api::FlowControlToken* flow_control, const HttpInterface::Headers* extra_headers) const override;
 
   [[nodiscard]] boost::filesystem::path getBasePath() const { return source_path_; }
   [[nodiscard]] boost::filesystem::path getImagesPath() const { return source_path_ / "images"; }

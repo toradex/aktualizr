@@ -8,13 +8,14 @@
 namespace Uptane {
 
 void Fetcher::fetchRole(std::string* result, int64_t maxsize, RepositoryType repo, const Uptane::Role& role,
-                        Version version, const api::FlowControlToken* flow_control) const {
+                        Version version, const api::FlowControlToken* flow_control,
+                        const HttpInterface::Headers* extra_headers) const {
   std::string url = (repo == RepositoryType::Director()) ? director_server : repo_server;
   if (role.IsDelegation()) {
     url += "/delegations";
   }
   url += "/" + version.RoleFileName(role);
-  HttpResponse response = http->get(url, maxsize, flow_control);
+  HttpResponse response = http->get(url, maxsize, flow_control, extra_headers);
   if (flow_control != nullptr && flow_control->hasAborted()) {
     throw Uptane::LocallyAborted(repo);
   }
@@ -27,8 +28,10 @@ void Fetcher::fetchRole(std::string* result, int64_t maxsize, RepositoryType rep
 
 void OfflineUpdateFetcher::fetchRole(std::string* result, int64_t maxsize, RepositoryType repo,
                                      const Uptane::Role& role, Version version,
-                                     const api::FlowControlToken* flow_control) const {
+                                     const api::FlowControlToken* flow_control,
+                                     const HttpInterface::Headers* extra_headers) const {
   (void)flow_control;  // Safe, we are only looking at the local file system
+  (void)extra_headers;
   boost::filesystem::path path;
   if (repo == RepositoryType::Director()) {
     path = getMetadataPath() / "director" / version.RoleFileName(role);

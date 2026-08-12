@@ -35,10 +35,15 @@ struct HttpResponse {
 
 class HttpInterface {
  public:
+  using Headers = std::vector<std::string>;
   HttpInterface() = default;
   virtual ~HttpInterface() = default;
-  virtual HttpResponse get(const std::string &url, int64_t maxsize, const api::FlowControlToken *flow_control) = 0;
-  HttpResponse get(const std::string &url, int64_t maxsize) { return get(url, maxsize, nullptr); }
+  virtual HttpResponse get(const std::string &url, int64_t maxsize, const api::FlowControlToken *flow_control,
+                           const Headers *extra_headers) = 0;
+  HttpResponse get(const std::string &url, int64_t maxsize) { return get(url, maxsize, nullptr, nullptr); }
+  HttpResponse get(const std::string &url, int64_t maxsize, const api::FlowControlToken *flow_control) {
+    return get(url, maxsize, flow_control, nullptr);
+  }
 
   /**
    * Resolve redirects (e.g. 302) and return the final effective URL.
@@ -65,6 +70,7 @@ class HttpInterface {
    */
   virtual void setCerts(const std::string &ca, CryptoSource ca_source, const std::string &cert,
                         CryptoSource cert_source, const std::string &pkey, CryptoSource pkey_source) = 0;
+
   static constexpr int64_t kNoLimit = 0;  // no limit the size of downloaded data
   static constexpr int64_t kPostRespLimit = 64LL * 1024;
   static constexpr int64_t kPutRespLimit = 64LL * 1024;

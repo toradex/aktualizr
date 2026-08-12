@@ -10,6 +10,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <boost/filesystem.hpp>
@@ -124,6 +125,7 @@ TEST(Uptane, VerifyDataBadThreshold) {
   data_json["signed"]["roles"]["root"]["threshold"] = -1;
   try {
     Uptane::Root root(Uptane::Root::Policy::kAcceptAll);
+    // NOLINTNEXTLINE(bugprone-unused-raii)
     Uptane::Root(Uptane::RepositoryType::Director(), data_json, root);
     FAIL() << "Illegal threshold should have thrown an error.";
   } catch (const Uptane::IllegalThreshold &ex) {
@@ -188,7 +190,8 @@ TEST(Uptane, AssembleManifestBad) {
       UptaneTestCommon::addDefaultSecondary(config, temp_dir, "secondary_ecu_serial", "secondary_hardware");
 
   /* Overwrite the Secondary's keys on disk. */
-  std::string private_key, public_key;
+  std::string private_key;
+  std::string public_key;
   ASSERT_TRUE(Crypto::generateKeyPair(ecu_config.key_type, &public_key, &private_key));
   Utils::writeFile(ecu_config.full_client_dir / ecu_config.ecu_private_key, private_key);
   public_key = Utils::readFile("tests/test_data/public.key");
@@ -234,12 +237,12 @@ TEST(Uptane, PutManifest) {
 
   Json::Value json = http->last_manifest;
 
-  EXPECT_EQ(json["signatures"].size(), 1u);
+  EXPECT_EQ(json["signatures"].size(), 1U);
   EXPECT_EQ(json["signed"]["primary_ecu_serial"].asString(), "testecuserial");
   EXPECT_EQ(
       json["signed"]["ecu_version_manifests"]["testecuserial"]["signed"]["installed_image"]["filepath"].asString(),
       "unknown");
-  EXPECT_EQ(json["signed"]["ecu_version_manifests"].size(), 2u);
+  EXPECT_EQ(json["signed"]["ecu_version_manifests"].size(), 2U);
   EXPECT_EQ(json["signed"]["ecu_version_manifests"]["secondary_ecu_serial"]["signed"]["ecu_serial"].asString(),
             "secondary_ecu_serial");
   EXPECT_EQ(json["signed"]["ecu_version_manifests"]["secondary_ecu_serial"]["signed"]["installed_image"]["filepath"]
@@ -249,8 +252,8 @@ TEST(Uptane, PutManifest) {
 
 class HttpPutManifestFail : public HttpFake {
  public:
-  HttpPutManifestFail(const boost::filesystem::path &test_dir_in, std::string flavor = "")
-      : HttpFake(test_dir_in, flavor) {}
+  explicit HttpPutManifestFail(const boost::filesystem::path &test_dir_in, std::string flavor = "")
+      : HttpFake(test_dir_in, std::move(flavor)) {}
   HttpResponse put(const std::string &url, const Json::Value &data) override {
     (void)data;
     return HttpResponse(url, 504, CURLE_OK, "");
@@ -527,10 +530,10 @@ TEST(Uptane, InstallFakeBad) {
 bool EcuInstallationStartedReportGot = false;
 class HttpFakeEvents : public HttpFake {
  public:
-  HttpFakeEvents(const boost::filesystem::path &test_dir_in, std::string flavor = "")
+  explicit HttpFakeEvents(const boost::filesystem::path &test_dir_in, std::string flavor = "")
       : HttpFake(test_dir_in, std::move(flavor)) {}
 
-  virtual HttpResponse handle_event(const std::string &url, const Json::Value &data) override {
+  HttpResponse handle_event(const std::string &url, const Json::Value &data) override {
     for (const auto &event : data) {
       if (event["eventType"]["id"].asString() == "EcuInstallationStarted") {
         if (event["event"]["ecu"].asString() == "secondary_ecu_serial") {
@@ -545,7 +548,8 @@ class HttpFakeEvents : public HttpFake {
 class SecondaryInterfaceMock : public SecondaryInterface {
  public:
   explicit SecondaryInterfaceMock(Primary::VirtualSecondaryConfig &sconfig_in) : sconfig(std::move(sconfig_in)) {
-    std::string private_key, public_key;
+    std::string private_key;
+    std::string public_key;
     if (!Crypto::generateKeyPair(sconfig.key_type, &public_key, &private_key)) {
       throw std::runtime_error("Key generation failure");
     }
@@ -594,12 +598,12 @@ class SecondaryInterfaceMock : public SecondaryInterface {
   data::InstallationResult putRoot(const std::string &, bool) override {
     return data::InstallationResult(data::ResultCode::Numeric::kOk, "");
   }
-  virtual data::InstallationResult sendFirmware(const Uptane::Target &, const InstallInfo &,
-                                                const api::FlowControlToken *) override {
+  data::InstallationResult sendFirmware(const Uptane::Target &, const InstallInfo &,
+                                        const api::FlowControlToken *) override {
     return data::InstallationResult(data::ResultCode::Numeric::kOk, "");
   }
-  virtual data::InstallationResult install(const Uptane::Target &, const InstallInfo &,
-                                           const api::FlowControlToken *) override {
+  data::InstallationResult install(const Uptane::Target &, const InstallInfo &,
+                                   const api::FlowControlToken *) override {
     return data::InstallationResult(data::ResultCode::Numeric::kOk, "");
   }
 #ifdef BUILD_OFFLINE_UPDATES
@@ -707,7 +711,7 @@ TEST(Uptane, UptaneSecondaryAdd) {
   EXPECT_EQ(ecu_data["ecus"][1]["ecu_serial"].asString(), "secondary_ecu_serial");
   EXPECT_EQ(ecu_data["ecus"][1]["hardware_identifier"].asString(), "secondary_hardware");
   EXPECT_EQ(ecu_data["ecus"][1]["clientKey"]["keytype"].asString(), "RSA");
-  EXPECT_TRUE(ecu_data["ecus"][1]["clientKey"]["keyval"]["public"].asString().size() > 0);
+  EXPECT_FALSE(ecu_data["ecus"][1]["clientKey"]["keyval"]["public"].asString().empty());
 }
 
 /* Adding multiple Secondaries with the same serial throws an error */
@@ -864,35 +868,8 @@ class HttpFakeProv : public HttpFake {
       EXPECT_EQ(data[0]["name"].asString(), "fake-package");
       EXPECT_EQ(data[0]["version"].asString(), "1.0");
     } else if (url.find("/director/manifest") != std::string::npos) {
-      /* Get manifest from Primary.
-       * Get Primary installation result.
-       * Send manifest to the server. */
-      manifest_count++;
-      std::string file_primary;
-      std::string file_secondary;
-      std::string hash_primary;
-      std::string hash_secondary;
-      if (manifest_count <= 1) {
-        file_primary = "unknown";
-        file_secondary = "noimage";
-        // Check for default initial value of packagemanagerfake.
-        hash_primary = Crypto::sha256digestHex("");
-        hash_secondary = Crypto::sha256digestHex("");
-      } else {
-        file_primary = "primary_firmware.txt";
-        file_secondary = "secondary_firmware.txt";
-        const Json::Value json = Utils::parseJSON(Utils::readFile(meta_dir / "director/targets_hasupdates.json"));
-        const Json::Value targets_list = json["signed"]["targets"];
-        hash_primary = targets_list["primary_firmware.txt"]["hashes"]["sha256"].asString();
-        hash_secondary = targets_list["secondary_firmware.txt"]["hashes"]["sha256"].asString();
-      }
-      const Json::Value manifest = data["signed"]["ecu_version_manifests"];
-      const Json::Value manifest_primary = manifest["CA:FE:A6:D2:84:9D"]["signed"]["installed_image"];
-      const Json::Value manifest_secondary = manifest["secondary_ecu_serial"]["signed"]["installed_image"];
-      EXPECT_EQ(file_primary, manifest_primary["filepath"].asString());
-      EXPECT_EQ(file_secondary, manifest_secondary["filepath"].asString());
-      EXPECT_EQ(manifest_primary["fileinfo"]["hashes"]["sha256"].asString(), hash_primary);
-      EXPECT_EQ(manifest_secondary["fileinfo"]["hashes"]["sha256"].asString(), hash_secondary);
+      /* Send the manifest to the server. */
+      manifests_.push_back(data);
     } else if (url.find("/system_info/network") != std::string::npos) {
       /* Send networking info to the server. */
       network_count++;
@@ -922,12 +899,15 @@ class HttpFakeProv : public HttpFake {
   size_t events_seen{0};
   int devices_count{0};
   int ecus_count{0};
-  int manifest_count{0};
   int installed_count{0};
   int system_info_count{0};
   int network_count{0};
   int config_count{0};
   Json::Value custom_hw_info;
+
+  const std::vector<Json::Value> &manifests() const { return manifests_; }
+  size_t manifests_count() const { return manifests_.size(); }
+  const boost::filesystem::path &metaDir() const { return meta_dir; }
 
  private:
   Config &config;
@@ -935,6 +915,7 @@ class HttpFakeProv : public HttpFake {
   int primary_download_complete{0};
   int secondary_download_start{0};
   int secondary_download_complete{0};
+  std::vector<Json::Value> manifests_;
 };
 
 /* Provision with a fake server and check for the exact number of expected
@@ -967,7 +948,7 @@ TEST(Uptane, ProvisionOnServer) {
 
   EXPECT_EQ(http->devices_count, 0);
   EXPECT_EQ(http->ecus_count, 0);
-  EXPECT_EQ(http->manifest_count, 0);
+  EXPECT_EQ(http->manifests_count(), 0U);
   EXPECT_EQ(http->installed_count, 0);
   EXPECT_EQ(http->system_info_count, 0);
   EXPECT_EQ(http->network_count, 0);
@@ -987,9 +968,12 @@ TEST(Uptane, ProvisionOnServer) {
   EXPECT_EQ(http->network_count, 1);
   EXPECT_EQ(http->config_count, 1);
 
-  result::UpdateCheck update_result = up->fetchMeta();
+  // fetchMeta() with peek=false is a discovery fetch: it uploads the vehicle
+  // version manifest, then stores director targets for download verification.
+  // (Manifest upload is skipped only on commit confirmation; see fetchMeta.)
+  result::UpdateCheck update_result = up->fetchMeta(/*peek=*/false);
   EXPECT_EQ(update_result.status, result::UpdateStatus::kUpdatesAvailable);
-  EXPECT_EQ(http->manifest_count, 1);
+  EXPECT_EQ(http->manifests_count(), 1U);
 
   // Test installation to make sure the metadata put to the server is correct.
   result::Download download_result = up->downloadImages(update_result.updates);
@@ -1001,11 +985,30 @@ TEST(Uptane, ProvisionOnServer) {
 
   EXPECT_EQ(http->devices_count, 1);
   EXPECT_EQ(http->ecus_count, 1);
-  EXPECT_EQ(http->manifest_count, 2);
+  EXPECT_EQ(http->manifests_count(), 2U);
   EXPECT_EQ(http->installed_count, 1);
   EXPECT_EQ(http->system_info_count, 1);
   EXPECT_EQ(http->network_count, 1);
   EXPECT_EQ(http->config_count, 1);
+
+  // Verify the contents of the post-install manifest (the second upload).
+  ASSERT_EQ(http->manifests_count(), 2U);
+  {
+    const Json::Value json = Utils::parseJSON(Utils::readFile(http->metaDir() / "director/targets_hasupdates.json"));
+    const Json::Value targets_list = json["signed"]["targets"];
+    const std::string file_primary = "primary_firmware.txt";
+    const std::string file_secondary = "secondary_firmware.txt";
+    const std::string hash_primary = targets_list["primary_firmware.txt"]["hashes"]["sha256"].asString();
+    const std::string hash_secondary = targets_list["secondary_firmware.txt"]["hashes"]["sha256"].asString();
+    const Json::Value &manifest_data = http->manifests().back();
+    const Json::Value manifest = manifest_data["signed"]["ecu_version_manifests"];
+    const Json::Value manifest_primary = manifest["CA:FE:A6:D2:84:9D"]["signed"]["installed_image"];
+    const Json::Value manifest_secondary = manifest["secondary_ecu_serial"]["signed"]["installed_image"];
+    EXPECT_EQ(file_primary, manifest_primary["filepath"].asString());
+    EXPECT_EQ(file_secondary, manifest_secondary["filepath"].asString());
+    EXPECT_EQ(manifest_primary["fileinfo"]["hashes"]["sha256"].asString(), hash_primary);
+    EXPECT_EQ(manifest_secondary["fileinfo"]["hashes"]["sha256"].asString(), hash_secondary);
+  }
 
   // Try sending device data again to confirm that it isn't resent if it hasn't
   // changed (and hardware info is only sent once).
@@ -1082,7 +1085,7 @@ TEST(Uptane, FsToSqlFull) {
   for (auto &target : fs_installed_versions) {
     Json::Value dump = target.toDebugJson();
     dump["custom"]["ecuIdentifiers"][serials[0].first.ToString()]["hardwareId"] = serials[0].second.ToString();
-    fixed_installed_versions.emplace_back(Uptane::Target(target.filename(), dump));
+    fixed_installed_versions.emplace_back(target.filename(), dump);
   }
 
   std::string director_root;
@@ -1261,12 +1264,13 @@ TEST(Uptane, SaveAndLoadVersion) {
 class HttpFakeUnstable : public HttpFake {
  public:
   explicit HttpFakeUnstable(const boost::filesystem::path &test_dir_in) : HttpFake(test_dir_in, "hasupdates") {}
-  HttpResponse get(const std::string &url, int64_t maxsize, const api::FlowControlToken *flow_control) override {
+  HttpResponse get(const std::string &url, int64_t maxsize, const api::FlowControlToken *flow_control,
+                   const Headers *extra_headers) override {
     if (unstable_valid_count >= unstable_valid_num) {
       return HttpResponse({}, 503, CURLE_OK, "");
     } else {
       ++unstable_valid_count;
-      return HttpFake::get(url, maxsize, flow_control);
+      return HttpFake::get(url, maxsize, flow_control, extra_headers);
     }
   }
 
