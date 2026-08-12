@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <libaktualizr/results.h>
 
+#include <algorithm>
 #include <chrono>
 #include <future>
 #include <string>
@@ -119,7 +120,15 @@ TEST(Aktualizr, FullNoUpdates) {
 
   verifyNothingInstalled(aktualizr.uptane_client()->AssembleManifest());
 
-  EXPECT_EQ(http->put_urls().back(), "/director/manifest?reason=poll");
+  // Find the first PUT to /director/manifest: that should report reason=service-start
+  // (the first cycle uses kServiceStart; subsequent cycles use kPoll).
+  auto const urls = http->put_urls();
+  auto first_manifest_it = std::find_if(urls.begin(), urls.end(), [](const std::string& url) {
+    return url.find("/director/manifest") != std::string::npos;
+  });
+  ASSERT_NE(first_manifest_it, urls.end());
+  EXPECT_EQ(*first_manifest_it, "/director/manifest?reason=service-start");
+  EXPECT_EQ(urls.back(), "/director/manifest?reason=poll");
 }
 
 /*
@@ -1192,6 +1201,17 @@ TEST(Aktualizr, AutoRebootAfterUpdate) {
     EXPECT_TRUE(!!current_target);
     EXPECT_FALSE(!!pending_target);
     EXPECT_EQ(http->manifest_sends, 3);
+
+    // After the emulated reboot, finalizeAfterReboot() should have PUT a manifest
+    // with reason=post-update.
+    bool found_post_update = false;
+    for (const auto& url : http->put_urls()) {
+      if (url.find("reason=post-update") != std::string::npos) {
+        found_post_update = true;
+        break;
+      }
+    }
+    EXPECT_TRUE(found_post_update) << "Expected a manifest PUT with reason=post-update after reboot";
   }
 }
 
