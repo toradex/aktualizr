@@ -20,7 +20,7 @@ class PackageManagerFake : public PackageManagerInterface {
   PackageManagerFake &operator=(PackageManagerFake &&) = delete;
   std::string name() const override { return "fake"; }
   Json::Value getInstalledPackages() const override;
-  bool hasOstreeDiverged() const override { return false; }
+  bool hasOstreeDiverged(const std::string& /* expected_hash */) const override { return false; }
   Uptane::Target getCurrent() const override;
 
   data::InstallationResult install(const Uptane::Target &target) const override;

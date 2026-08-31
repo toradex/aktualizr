@@ -55,7 +55,7 @@ class PackageManagerInterface {
   PackageManagerInterface& operator=(PackageManagerInterface&&) = delete;
   virtual std::string name() const = 0;
   virtual Json::Value getInstalledPackages() const = 0;
-  virtual bool hasOstreeDiverged() const = 0;
+  virtual bool hasOstreeDiverged(const std::string& expected_hash) const = 0;
   virtual Uptane::Target getCurrent() const = 0;
   virtual data::InstallationResult install(const Uptane::Target& target) const = 0;
   virtual void completeInstall() const { throw std::runtime_error("Unimplemented"); }

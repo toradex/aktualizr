@@ -494,10 +494,10 @@ std::string OstreeManager::getCurrentHash() const {
   return ostree_deployment_get_csum(deployment);
 }
 
-bool OstreeManager::hasOstreeDiverged() const {
-  boost::optional<Uptane::Target> current_version;
-  storage_->loadPrimaryInstalledVersions(&current_version, nullptr, nullptr);
-  return !current_version || (current_version->sha256Hash() != getCurrentHash());
+bool OstreeManager::hasOstreeDiverged(const std::string& expected_hash) const {
+  // Kept free of storage access: the caller already holds the current version under the correct
+  // ECU serial, whereas resolving the Primary here would depend on the 'ecus' table.
+  return expected_hash != getCurrentHash();
 }
 
 Uptane::Target OstreeManager::getCurrent() const {

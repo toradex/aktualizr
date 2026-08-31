@@ -694,7 +694,7 @@ void SotaUptaneClient::getNewTargets(std::vector<Uptane::Target> *new_targets, u
       } else if (current_version->MatchTarget(target)) {
         // Check OSTree to make sure storage is up to date
         if (primary_ecu_serial == ecu_serial && target.IsOstree() && config.pacman.type == PACKAGE_MANAGER_OSTREE) {
-          if (package_manager_->hasOstreeDiverged()) {
+          if (package_manager_->hasOstreeDiverged(current_version->sha256Hash())) {
             LOG_WARNING << "Current storage version differs from deployed commit; treating as new target";
             is_new = true;
           }
