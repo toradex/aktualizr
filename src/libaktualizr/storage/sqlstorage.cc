@@ -1159,7 +1159,7 @@ void SQLStorage::saveInstalledVersion(const std::string& ecu_serial, const Uptan
   db.commitTransaction();
 }
 
-static void loadEcuMap(SQLite3Guard& db, std::string& ecu_serial, Uptane::EcuMap& ecu_map) {
+void SQLStorage::loadEcuMap(SQLite3Guard& db, std::string& ecu_serial, Uptane::EcuMap& ecu_map) const {
   // The Secondary only knows about itself and in its database it is considered
   // a Primary, for better or worse.
   if (ecu_serial.empty()) {
@@ -1167,9 +1167,9 @@ static void loadEcuMap(SQLite3Guard& db, std::string& ecu_serial, Uptane::EcuMap
     if (statement.step() == SQLITE_ROW) {
       ecu_serial = statement.get_result_col_str(0).value();
     } else if (statement.step() == SQLITE_DONE) {
-      LOG_DEBUG << "No serial found in database for this ECU, defaulting to empty serial";
+      LOG_DEBUG << "No serial found in the 'ecus' table for this ECU";
     } else {
-      LOG_ERROR << "Error getting serial for this ECU, defaulting to empty serial: " << db.errmsg();
+      LOG_ERROR << "Error getting serial for this ECU: " << db.errmsg();
     }
   }
 
@@ -1179,9 +1179,21 @@ static void loadEcuMap(SQLite3Guard& db, std::string& ecu_serial, Uptane::EcuMap
       ecu_map.insert(
           {Uptane::EcuSerial(ecu_serial), Uptane::HardwareIdentifier(statement.get_result_col_str(0).value())});
     } else if (statement.step() == SQLITE_DONE) {
-      LOG_DEBUG << "No hardware ID found in database for ECU serial " << ecu_serial;
+      LOG_DEBUG << "No hardware ID found in the 'ecus' table for ECU serial " << ecu_serial;
     } else {
       LOG_ERROR << "Error getting hardware ID for ECU serial " << ecu_serial << ": " << db.errmsg();
+    }
+  }
+
+  // 'ecus' stays empty until the ECUs register with a server; fall back to the stashed serials.
+  if (ecu_serial.empty()) {
+    EcuSerials stashed_serials;
+    if (getEcuSerialsForHwId(&stashed_serials)) {
+      // Non-empty per getEcuSerialsForHwId(), Primary first per initEcuSerials(). Note that
+      // ManagedSecondary stashes the Primary's list into a Secondary's own database, where
+      // index 0 is not that ECU.
+      ecu_serial = stashed_serials.at(0).first.ToString();
+      LOG_DEBUG << "Using stashed Primary ECU serial " << ecu_serial;
     }
   }
 }

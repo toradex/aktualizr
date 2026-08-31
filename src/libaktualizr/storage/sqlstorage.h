@@ -124,6 +124,7 @@ class SQLStorage : public SQLStorageBase, public INvStorage {
 
  private:
   void cleanMetaVersion(Uptane::RepositoryType repo, const Uptane::Role& role);
+  void loadEcuMap(SQLite3Guard& db, std::string& ecu_serial, Uptane::EcuMap& ecu_map) const;
 
   EcuSerials stashed_ecu_serials_;
 };
