@@ -54,7 +54,7 @@ void resume(const Uptane::Target& target) {
   Uptane::Fetcher fetcher(config, http);
 
   resumed = true;
-  bool res = pacman->fetchTarget(target, fetcher, keys, progress_cb, &token);
+  bool res = pacman->fetchTarget(target, fetcher, keys, progress_cb, &token).success;
 
   EXPECT_TRUE(res);
 }
@@ -71,7 +71,7 @@ void try_and_die(const Uptane::Target& target, bool graceful) {
   auto result = download_promise.get_future();
 
   std::thread([&target, &fetcher, &download_promise, &token, pacman, &keys]() {
-    bool res = pacman->fetchTarget(target, fetcher, keys, progress_cb, &token);
+    bool res = pacman->fetchTarget(target, fetcher, keys, progress_cb, &token).success;
     download_promise.set_value(res);
   }).detach();
 

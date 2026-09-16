@@ -202,7 +202,9 @@ TEST(VirtualSecondary, RootRotationFailure) {
   install_result = aktualizr.Install(download_result.updates).get();
   EXPECT_EQ(install_result.dev_report.result_code,
             data::ResultCode(data::ResultCode::Numeric::kVerificationFailed, "secondary_hw:VERIFICATION_FAILED"));
-  EXPECT_EQ(install_result.dev_report.description, "Sending metadata to one or more ECUs failed");
+  // The device-level description now carries the failing ECU's own error detail
+  // (prefixed with its hardware id) instead of a generic message.
+  EXPECT_NE(install_result.dev_report.description.find("secondary_hw: "), std::string::npos);
 
   fiu_disable("secondary_putroot");
 

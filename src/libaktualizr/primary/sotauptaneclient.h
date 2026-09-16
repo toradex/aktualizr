@@ -157,6 +157,10 @@ class SotaUptaneClient {
                                    const std::string &expected_correlation_id = "");
   result::UpdateStatus checkUpdatesOffline(const std::vector<Uptane::Target> &targets,
                                            UpdateType utype = UpdateType::kOnline);
+  // Append the detail of the most recently captured exception (last_exception) to a
+  // generic failure message, so the installation report sent to the server explains
+  // what went wrong. Returns fallback unchanged if no exception was captured.
+  std::string describeFailure(const std::string &fallback) const;
   void uptaneIteration(std::vector<Uptane::Target> *targets, unsigned int *ecus_count,
                        UpdateType utype = UpdateType::kOnline, bool peek = false);
   void uptaneOfflineIteration(std::vector<Uptane::Target> *targets, unsigned int *ecus_count,

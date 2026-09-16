@@ -99,11 +99,12 @@ static void restoreHasherState(MultiPartHasher& hasher, std::ifstream data) {
   } while (data.gcount() != 0);
 }
 
-bool PackageManagerInterface::fetchTarget(const Uptane::Target& target, Uptane::Fetcher& fetcher,
-                                          const KeyManager& keys, const FetcherProgressCb& progress_cb,
-                                          const api::FlowControlToken* token) {
+PackageManagerInterface::FetchResult PackageManagerInterface::fetchTarget(const Uptane::Target& target,
+                                                                         Uptane::Fetcher& fetcher,
+                                                                         const KeyManager& keys,
+                                                                         const FetcherProgressCb& progress_cb,
+                                                                         const api::FlowControlToken* token) {
   (void)keys;
-  bool result = false;
   try {
     if (target.hashes().empty()) {
       throw Uptane::Exception("image", "No hash defined for the target");
@@ -111,13 +112,13 @@ bool PackageManagerInterface::fetchTarget(const Uptane::Target& target, Uptane::
     TargetStatus exists = PackageManagerInterface::verifyTarget(target);
     if (exists == TargetStatus::kGood) {
       LOG_INFO << "Image already downloaded; skipping download";
-      return true;
+      return {true, ""};
     }
     std::unique_ptr<DownloadMetaStruct> ds = std_::make_unique<DownloadMetaStruct>(target, progress_cb, token);
     if (target.length() == 0) {
       LOG_INFO << "Skipping download of target with length 0";
       ds->fhandle = createTargetFile(target);
-      return true;
+      return {true, ""};
     }
     if (exists == TargetStatus::kIncomplete) {
       LOG_INFO << "Continuing incomplete download of file " << target.filename();
@@ -171,32 +172,44 @@ bool PackageManagerInterface::fetchTarget(const Uptane::Target& target, Uptane::
       if (response.curl_code == CURLE_WRITE_ERROR) {
         throw Uptane::OversizedTarget(target.filename());
       }
-      throw Uptane::Exception("image", "Could not download file, error: " + response.error_message);
+      // getStatusStr() carries the curl code and HTTP status; error_message alone is
+      // often empty (e.g. an HTTP 404 where curl itself succeeded).
+      throw Uptane::Exception("image", "Could not download file from " + target_url + ": " + response.getStatusStr());
     }
     if (!target.MatchHash(Hash(ds->hash_type, ds->hasher().getHexDigest()))) {
       ds->fhandle.close();
       removeTargetFile(target);
-      throw Uptane::TargetHashMismatch(target.filename());
+      // A hash mismatch usually means the wrong bytes arrived (an error page, a
+      // redirect target, truncated content). Report what we actually got -- the
+      // computed hash, the expected hash(es), how many bytes were downloaded, and
+      // the HTTP status -- so the failure reported to the server is diagnosable.
+      const Hash computed_hash(ds->hash_type, ds->hasher().getHexDigest());
+      throw Uptane::Exception("image", "Hash mismatch for target " + target.filename() + " downloaded from " +
+                                           target_url + ": expected " + Hash::encodeVector(target.hashes()) +
+                                           ", computed " + computed_hash.TypeString() + ":" +
+                                           computed_hash.HashString() + " over " +
+                                           std::to_string(ds->downloaded_length) + " of " +
+                                           std::to_string(target.length()) +
+                                           " expected bytes; HTTP status: " + response.getStatusStr());
     }
     ds->fhandle.close();
-    result = true;
+    return {true, ""};
   } catch (const std::exception& e) {
     LOG_WARNING << "Error while downloading a target: " << e.what();
+    return {false, e.what()};
   }
-  return result;
 }
 
 #ifdef BUILD_OFFLINE_UPDATES
-bool PackageManagerInterface::fetchTargetOffUpd(const Uptane::Target& target,
-                                                const Uptane::OfflineUpdateFetcher& fetcher, const KeyManager& keys,
-                                                const FetcherProgressCb& progress_cb,
-                                                const api::FlowControlToken* token) {
+PackageManagerInterface::FetchResult PackageManagerInterface::fetchTargetOffUpd(
+    const Uptane::Target& target, const Uptane::OfflineUpdateFetcher& fetcher, const KeyManager& keys,
+    const FetcherProgressCb& progress_cb, const api::FlowControlToken* token) {
   // TODO: [OFFUPD] Test this function with large files.
   (void)keys;
   try {
     if (verifyTarget(target) == TargetStatus::kGood) {
       LOG_INFO << "Image already fetched; skipping fetching";
-      return true;
+      return {true, ""};
     }
 
     LOG_INFO << "Initiating fetching of file " << target.filename();
@@ -234,7 +247,7 @@ bool PackageManagerInterface::fetchTargetOffUpd(const Uptane::Target& target,
       // This is equivalent to the work done by DownloadHandler in the online case.
       if (static_cast<uint64_t>(downloaded_length + source.gcount()) > target.length()) {
         LOG_WARNING << "File " << target.filename() << " is bigger than expected";
-        return false;
+        return {false, "File " + target.filename() + " is bigger than expected"};
       }
       destination_file.write(buffer.data(), source.gcount());
       hasher->update(buffer.data(), source.gcount());
@@ -266,10 +279,10 @@ bool PackageManagerInterface::fetchTargetOffUpd(const Uptane::Target& target,
       throw Uptane::TargetHashMismatch(target.filename());
     }
     LOG_DEBUG << "Successfully fetched  " << target.filename();
-    return true;
+    return {true, ""};
   } catch (const std::exception& e) {
     LOG_WARNING << "Error while fetching a target: " << e.what();
-    return false;
+    return {false, e.what()};
   }
 }
 #endif

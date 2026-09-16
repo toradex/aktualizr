@@ -106,27 +106,28 @@ data::InstallationResult PackageManagerFake::finalizeInstall(const Uptane::Targe
   return install_res;
 }
 
-bool PackageManagerFake::fetchTarget(const Uptane::Target& target, Uptane::Fetcher& fetcher, const KeyManager& keys,
-                                     const FetcherProgressCb& progress_cb, const api::FlowControlToken* token) {
+PackageManagerInterface::FetchResult PackageManagerFake::fetchTarget(const Uptane::Target& target,
+                                                                    Uptane::Fetcher& fetcher, const KeyManager& keys,
+                                                                    const FetcherProgressCb& progress_cb,
+                                                                    const api::FlowControlToken* token) {
   // fault injection: only enabled with FIU_ENABLE defined. Note that all
   // exceptions thrown in PackageManagerInterface::fetchTarget are caught by a
   // try in the same function, so we can only emulate the warning and return
   // value.
   if (fiu_fail("fake_package_download") != 0) {
     const std::string failure_cause = fault_injection_last_info();
-    if (!failure_cause.empty()) {
-      LOG_WARNING << "Error while downloading a target: " << failure_cause;
-    } else {
-      LOG_WARNING << "Error while downloading a target: forced failure";
-    }
-    return false;
+    const std::string error = failure_cause.empty() ? "forced failure" : failure_cause;
+    LOG_WARNING << "Error while downloading a target: " << error;
+    return {false, error};
   }
 
   // TODO(OTA-4939): Unify this with the check in
   // SotaUptaneClient::getNewTargets() and make it more generic.
   if (target.IsOstree()) {
-    LOG_ERROR << "Cannot download OSTree target " << target.filename() << " with the fake package manager!";
-    return false;
+    const std::string error =
+        "Cannot download OSTree target " + target.filename() + " with the fake package manager!";
+    LOG_ERROR << error;
+    return {false, error};
   }
 
   return PackageManagerInterface::fetchTarget(target, fetcher, keys, progress_cb, token);

@@ -431,7 +431,7 @@ TEST(UptaneUpdateFailure, PrimaryInstallFailureNoReboot) {
                   "result" :
                   {
                           "code" : "primary_hw:INSTALL_FAILED",
-                          "description" : "Installation failed on one or more ECUs",
+                          "description" : "primary_hw: PackageManagerFake install failed because of fake_fail_install",
                           "success" : false
                   }
           }
@@ -505,7 +505,7 @@ TEST(UptaneUpdateFailure, PrimaryInstallFailure) {
       "result" :
       {
         "code" : "primary_hw:INSTALL_FAILED",
-        "description" : "Installation failed on one or more ECUs",
+        "description" : "primary_hw: PackageManagerFake install failed after reboot because of fake_fail_install",
         "success" : false
       }
     }

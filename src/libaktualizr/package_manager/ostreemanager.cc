@@ -389,27 +389,35 @@ OstreeManager::OstreeManager(const PackageConfig &pconfig, const BootloaderConfi
 
 OstreeManager::~OstreeManager() { bootloader_.reset(nullptr); }
 
-bool OstreeManager::fetchTarget(const Uptane::Target &target, Uptane::Fetcher &fetcher, const KeyManager &keys,
-                                const FetcherProgressCb &progress_cb, const api::FlowControlToken *token) {
+PackageManagerInterface::FetchResult OstreeManager::fetchTarget(const Uptane::Target &target, Uptane::Fetcher &fetcher,
+                                                                const KeyManager &keys,
+                                                                const FetcherProgressCb &progress_cb,
+                                                                const api::FlowControlToken *token) {
   if (!target.IsOstree()) {
     // The case when the OSTree package manager is set as a package manager for aktualizr
     // while the target is aimed for a Secondary ECU that is configured with another/non-OSTree package manager
     return PackageManagerInterface::fetchTarget(target, fetcher, keys, progress_cb, token);
   }
-  return OstreeManager::pull(config.sysroot, config.ostree_server, keys, target, token, progress_cb).success;
+  const data::InstallationResult pull_result =
+      OstreeManager::pull(config.sysroot, config.ostree_server, keys, target, token, progress_cb);
+  return {pull_result.isSuccess(), pull_result.description};
 }
 
 #ifdef BUILD_OFFLINE_UPDATES
-bool OstreeManager::fetchTargetOffUpd(const Uptane::Target &target, const Uptane::OfflineUpdateFetcher &fetcher,
-                                      const KeyManager &keys, const FetcherProgressCb &progress_cb,
-                                      const api::FlowControlToken *token) {
+PackageManagerInterface::FetchResult OstreeManager::fetchTargetOffUpd(const Uptane::Target &target,
+                                                                     const Uptane::OfflineUpdateFetcher &fetcher,
+                                                                     const KeyManager &keys,
+                                                                     const FetcherProgressCb &progress_cb,
+                                                                     const api::FlowControlToken *token) {
   if (!target.IsOstree()) {
     // The case when the OSTree package manager is set as a package manager for aktualizr
     // while the target is aimed for a Secondary ECU that is configured with another/non-OSTree package manager
     return PackageManagerInterface::fetchTargetOffUpd(target, fetcher, keys, progress_cb, token);
   }
   auto srcrepo_path = fetcher.getImagesPath() / "ostree";
-  return OstreeManager::pullLocal(config.sysroot, srcrepo_path, target, progress_cb).success;
+  const data::InstallationResult pull_result =
+      OstreeManager::pullLocal(config.sysroot, srcrepo_path, target, progress_cb);
+  return {pull_result.isSuccess(), pull_result.description};
 }
 #endif
 
