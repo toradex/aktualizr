@@ -162,7 +162,10 @@ class SotaUptaneClient {
   void uptaneOfflineIteration(std::vector<Uptane::Target> *targets, unsigned int *ecus_count,
                               UpdateType utype = UpdateType::kOnline);
 
-  std::pair<bool, Uptane::Target> downloadImage(const Uptane::Target &target, UpdateType utype = UpdateType::kOnline);
+  // On failure, if error_out is non-null it receives the reason the download failed (curl/HTTP
+  // detail, hash mismatch, ...), captured locally so callers need not consult last_exception.
+  std::pair<bool, Uptane::Target> downloadImage(const Uptane::Target &target, UpdateType utype = UpdateType::kOnline,
+                                                std::string *error_out = nullptr);
   data::InstallationResult PackageInstall(const Uptane::Target &target);
   Uptane::Manifest AssembleManifest();
   std::exception_ptr getLastException() const { return last_exception; }

@@ -37,6 +37,22 @@ static void report_progress_cb(event::Channel *channel, const Uptane::Target &ta
   (*channel)(event);
 }
 
+// Append one ECU's failure detail ("<hw_id>: <description>") to an aggregated, human-readable
+// device-level description, joining entries with " | ". Each contribution is bounded so that a
+// single ECU with a very long reason (e.g. an enriched hash-mismatch message) cannot crowd out
+// the reasons of other ECUs when the whole string is later capped in InstallationResult::toJson().
+static void appendEcuFailureDescription(std::string *aggregate, const std::string &hw_id,
+                                        const std::string &description) {
+  if (description.empty()) {
+    return;
+  }
+  static constexpr size_t kMaxPerEcuDescriptionLength = 256;
+  std::string bounded =
+      description.length() > kMaxPerEcuDescriptionLength ? description.substr(0, kMaxPerEcuDescriptionLength) + "..."
+                                                         : description;
+  *aggregate += (!aggregate->empty() ? " | " : "") + hw_id + ": " + bounded;
+}
+
 /**
  * A utility class to compare targets between Image and Director repositories.
  * The definition of 'sameness' is in Target::MatchTarget().
@@ -598,6 +614,7 @@ void SotaUptaneClient::computeDeviceInstallationResult(data::InstallationResult 
     }
 
     std::string result_code_err_str;
+    std::string result_desc_err_str;
 
     for (const auto &r : ecu_results) {
       auto ecu_serial = r.first;
@@ -628,14 +645,15 @@ void SotaUptaneClient::computeDeviceInstallationResult(data::InstallationResult 
       if (!installation_res.isSuccess()) {
         const std::string ecu_code_str = (*hw_id).ToString() + ":" + installation_res.result_code.ToString();
         result_code_err_str += (!result_code_err_str.empty() ? "|" : "") + ecu_code_str;
+        appendEcuFailureDescription(&result_desc_err_str, (*hw_id).ToString(), installation_res.description);
       }
     }
 
     if (!result_code_err_str.empty()) {
       // installation on at least one of the ECUs has failed
-      device_installation_result =
-          data::InstallationResult(data::ResultCode(data::ResultCode::Numeric::kInstallFailed, result_code_err_str),
-                                   "Installation failed on one or more ECUs");
+      device_installation_result = data::InstallationResult(
+          data::ResultCode(data::ResultCode::Numeric::kInstallFailed, result_code_err_str),
+          result_desc_err_str.empty() ? "Installation failed on one or more ECUs" : result_desc_err_str);
       raw_ir = "Installation failed on one or more ECUs";
 
       break;
@@ -838,10 +856,15 @@ result::Download SotaUptaneClient::downloadImages(const std::vector<Uptane::Targ
   std::vector<Uptane::Target> downloaded_targets;
 
   result::UpdateStatus update_status;
+  // Detail of the failure captured from this call only; empty when checkUpdatesOffline
+  // returned kError without throwing (e.g. an install is already pending), so we never
+  // append a stale, unrelated exception to the report.
+  std::string recheck_error;
   try {
     update_status = checkUpdatesOffline(targets, utype);
   } catch (const std::exception &e) {
     last_exception = std::current_exception();
+    recheck_error = e.what();
     update_status = result::UpdateStatus::kError;
   }
 
@@ -849,9 +872,10 @@ result::Download SotaUptaneClient::downloadImages(const std::vector<Uptane::Targ
     result = result::Download({}, result::DownloadStatus::kNothingToDownload, "");
   } else if (update_status == result::UpdateStatus::kError) {
     result = result::Download(downloaded_targets, result::DownloadStatus::kError, "Error rechecking stored metadata.");
-    storeInstallationFailure(
-        data::InstallationResult(data::ResultCode::Numeric::kInternalError, "Error rechecking stored metadata."),
-        director_repo.getCorrelationId());
+    const std::string description = recheck_error.empty() ? "Error rechecking stored metadata"
+                                                          : "Error rechecking stored metadata: " + recheck_error;
+    storeInstallationFailure(data::InstallationResult(data::ResultCode::Numeric::kInternalError, description),
+                             director_repo.getCorrelationId());
   }
 
   if (update_status != result::UpdateStatus::kUpdatesAvailable) {
@@ -862,10 +886,16 @@ result::Download SotaUptaneClient::downloadImages(const std::vector<Uptane::Targ
     return result;
   }
 
+  // Reason from the most recent failed target, captured locally so the report reflects
+  // this download attempt rather than any earlier exception stored on the object.
+  std::string download_error;
   for (const auto &target : targets) {
-    auto res = downloadImage(target, utype);
+    std::string target_error;
+    auto res = downloadImage(target, utype, &target_error);
     if (res.first) {
       downloaded_targets.push_back(res.second);
+    } else if (!target_error.empty()) {
+      download_error = target_error;
     }
   }
 
@@ -879,9 +909,10 @@ result::Download SotaUptaneClient::downloadImages(const std::vector<Uptane::Targ
       LOG_ERROR << "Only " << downloaded_targets.size() << " of " << targets.size() << " were successfully downloaded.";
       result = result::Download(downloaded_targets, result::DownloadStatus::kPartialSuccess, "");
     }
-    storeInstallationFailure(
-        data::InstallationResult(data::ResultCode::Numeric::kDownloadFailed, "Target download failed."),
-        director_repo.getCorrelationId());
+    const std::string description =
+        download_error.empty() ? "Target download failed" : "Target download failed: " + download_error;
+    storeInstallationFailure(data::InstallationResult(data::ResultCode::Numeric::kDownloadFailed, description),
+                             director_repo.getCorrelationId());
   }
 
   sendEvent<event::AllDownloadsComplete>(result);
@@ -927,7 +958,8 @@ bool SotaUptaneClient::needTargetFileOnPrimary(const Uptane::Target &target) {
   });
 }
 
-std::pair<bool, Uptane::Target> SotaUptaneClient::downloadImage(const Uptane::Target &target, UpdateType utype) {
+std::pair<bool, Uptane::Target> SotaUptaneClient::downloadImage(const Uptane::Target &target, UpdateType utype,
+                                                                std::string *error_out) {
   auto correlation_id = director_repo.getCorrelationId();
   // Send an event for all ECUs that are touched by this target. Don't report
   // this to the server for offline updates, since that would create confusion
@@ -942,6 +974,11 @@ std::pair<bool, Uptane::Target> SotaUptaneClient::downloadImage(const Uptane::Ta
   // downloadImages but aktualizr-lite currently calls this method directly.
 
   bool success = false;
+  // Set when the package-manager fetch itself failed: fetch_error is the reason it reported,
+  // which may be empty. Kept separate from the exception text so the caller does not restate
+  // the generic "Target download failed" fallback when no reason was given.
+  bool fetch_failed = false;
+  std::string fetch_error;
   try {
     KeyManager keys(storage, config.keymanagerConfig());
     keys.loadKeys();
@@ -954,31 +991,36 @@ std::pair<bool, Uptane::Target> SotaUptaneClient::downloadImage(const Uptane::Ta
       int tries = 0;
       std::chrono::milliseconds wait(500);
 
+      PackageManagerInterface::FetchResult fetch_result;
       for (; tries < max_tries; tries++) {
         if (utype == UpdateType::kOffline) {
 #ifdef BUILD_OFFLINE_UPDATES
-          success = package_manager_->fetchTargetOffUpd(target, *uptane_fetcher_offupd, keys, prog_cb, flow_control_);
+          fetch_result =
+              package_manager_->fetchTargetOffUpd(target, *uptane_fetcher_offupd, keys, prog_cb, flow_control_);
 #else
-          success = false;
+          fetch_result = {false, "Offline updates are not supported in this build"};
 #endif
         } else {
-          success = package_manager_->fetchTarget(target, *uptane_fetcher, keys, prog_cb, flow_control_);
+          fetch_result = package_manager_->fetchTarget(target, *uptane_fetcher, keys, prog_cb, flow_control_);
         }
         // Skip trying to fetch the 'target' if control flow token transaction
         // was set to the 'abort' or 'pause' state, see the CommandQueue and FlowControlToken.
-        if (success || (flow_control_ != nullptr && flow_control_->hasAborted())) {
+        if (fetch_result || (flow_control_ != nullptr && flow_control_->hasAborted())) {
           break;
         } else if (tries < max_tries - 1) {
           std::this_thread::sleep_for(wait);
           wait *= 2;
         }
       }
+      success = static_cast<bool>(fetch_result);
       if (!success) {
         LOG_ERROR << "Download unsuccessful after " << tries << " attempts.";
-        // TODO: Throw more meaningful exceptions. Failure can be caused by more
-        // than just a hash mismatch. However, this is purely internal and
-        // mostly just relevant for testing.
-        throw Uptane::TargetHashMismatch(target.filename());
+        // Propagate the reason reported by the package manager (curl/HTTP detail,
+        // hash mismatch, insufficient disk space, ...) so it reaches the server in
+        // the installation report, instead of a generic hash-mismatch error.
+        fetch_failed = true;
+        fetch_error = fetch_result.error;
+        throw Uptane::Exception("image", fetch_result.error.empty() ? "Target download failed" : fetch_result.error);
       }
     } else {
       // No need to store image on primary (e.g. OSTree secondary or handler-download generic secondary).
@@ -987,6 +1029,11 @@ std::pair<bool, Uptane::Target> SotaUptaneClient::downloadImage(const Uptane::Ta
   } catch (const std::exception &e) {
     LOG_ERROR << "Error downloading image: " << e.what();
     last_exception = std::current_exception();
+    if (error_out != nullptr) {
+      // For a fetch failure use the package manager's own reason (empty when it gave none, so
+      // the caller falls back to its generic message); for any other exception use its text.
+      *error_out = fetch_failed ? fetch_error : std::string(e.what());
+    }
   }
 
   // send this asynchronously before `sendEvent`, so that the report timestamp
@@ -1121,9 +1168,9 @@ result::UpdateCheck SotaUptaneClient::checkUpdates(UpdateType utype, bool peek,
     // TODO: Consider using this check throughout sotauptaneclient for more consistent exception handling.
     if (e.getPersistence() == Uptane::Persistence::kPermanent && utype == UpdateType::kOnline) {
       LOG_ERROR << "Unable to verify metadata.";
-      storeInstallationFailure(
-          data::InstallationResult(data::ResultCode::Numeric::kVerificationFailed, "Could not update metadata"),
-          director_repo.getCorrelationId());
+      storeInstallationFailure(data::InstallationResult(data::ResultCode::Numeric::kVerificationFailed,
+                                                        std::string("Could not update metadata: ") + e.what()),
+                               director_repo.getCorrelationId());
     }
     last_exception = std::current_exception();
     return {{}, 0, result::UpdateStatus::kError, "Could not update metadata."};
@@ -1177,9 +1224,9 @@ result::UpdateCheck SotaUptaneClient::checkUpdates(UpdateType utype, bool peek,
   } catch (const std::exception &e) {
     last_exception = std::current_exception();
     LOG_ERROR << e.what();
-    storeInstallationFailure(
-        data::InstallationResult(data::ResultCode::Numeric::kVerificationFailed, "Metadata verification failed."),
-        director_repo.getCorrelationId());
+    storeInstallationFailure(data::InstallationResult(data::ResultCode::Numeric::kVerificationFailed,
+                                                      std::string("Metadata verification failed: ") + e.what()),
+                             director_repo.getCorrelationId());
     return {{}, 0, result::UpdateStatus::kError, "Target mismatch."};
   }
 
@@ -1725,6 +1772,7 @@ void SotaUptaneClient::sendMetadataToEcus(const std::vector<Uptane::Target> &tar
                                           std::string *raw_installation_report, UpdateType utype) {
   data::InstallationResult final_result{data::ResultCode::Numeric::kOk, ""};
   std::string result_code_err_str;
+  std::string result_desc_err_str;
   for (const auto &target : targets) {
     for (const auto &ecu : target.ecus()) {
       const Uptane::EcuSerial ecu_serial = ecu.first;
@@ -1767,15 +1815,16 @@ void SotaUptaneClient::sendMetadataToEcus(const std::vector<Uptane::Target> &tar
                   << local_result.description;
         const std::string ecu_code_str = hw_id.ToString() + ":" + local_result.result_code.ToString();
         result_code_err_str += (!result_code_err_str.empty() ? "|" : "") + ecu_code_str;
+        appendEcuFailureDescription(&result_desc_err_str, hw_id.ToString(), local_result.description);
       }
     }
   }
 
   if (!result_code_err_str.empty()) {
     // Sending the metadata to at least one of the ECUs has failed.
-    final_result =
-        data::InstallationResult(data::ResultCode(data::ResultCode::Numeric::kVerificationFailed, result_code_err_str),
-                                 "Sending metadata to one or more ECUs failed");
+    final_result = data::InstallationResult(
+        data::ResultCode(data::ResultCode::Numeric::kVerificationFailed, result_code_err_str),
+        result_desc_err_str.empty() ? "Sending metadata to one or more ECUs failed" : result_desc_err_str);
     if (raw_installation_report != nullptr) {
       *raw_installation_report = "Sending metadata to one or more ECUs failed";
     }

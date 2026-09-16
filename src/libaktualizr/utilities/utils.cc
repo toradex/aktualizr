@@ -838,6 +838,44 @@ std::string Utils::urlEncode(const std::string &input) {
   return res;
 }
 
+std::string Utils::redactUrlQueryStrings(const std::string &input) {
+  std::string res;
+  res.reserve(input.size());
+  bool in_url = false;         // seen a "scheme://" since the last whitespace
+  bool skipping_query = false;  // currently dropping a URL's query string
+  size_t i = 0;
+  const size_t n = input.size();
+  while (i < n) {
+    const char c = input[i];
+    // A URL (and thus its query string) ends at the first whitespace.
+    if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v') {
+      in_url = false;
+      skipping_query = false;
+      res.push_back(c);
+      ++i;
+      continue;
+    }
+    if (skipping_query) {
+      ++i;  // drop query characters
+      continue;
+    }
+    if (c == ':' && i + 2 < n && input[i + 1] == '/' && input[i + 2] == '/') {
+      in_url = true;
+      res.append("://");
+      i += 3;
+      continue;
+    }
+    if (in_url && c == '?') {
+      skipping_query = true;
+      ++i;
+      continue;
+    }
+    res.push_back(c);
+    ++i;
+  }
+  return res;
+}
+
 CURL *Utils::curlDupHandleWrapper(CURL *const curl_in, const bool using_pkcs11) {
   CURL *curl = curl_easy_duphandle(curl_in);
 

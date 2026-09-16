@@ -184,10 +184,21 @@ ResultCode data::ResultCode::fromRepr(const std::string &repr) {
 }
 
 Json::Value InstallationResult::toJson() const {
+  // Cap the description reported to the server. Enriched failure reasons (hash mismatches,
+  // curl/HTTP detail, per-ECU messages aggregated across many ECUs) can grow large, and the
+  // service should not receive an unbounded string. Truncate with a marker so it is clear
+  // the value was cut rather than silently shortened.
+  static constexpr size_t kMaxDescriptionLength = 1024;
+  static const std::string kTruncationMarker = "...[truncated]";
+
   Json::Value json;
   json["success"] = success;
   json["code"] = result_code.ToString();
-  json["description"] = description;
+  if (description.length() > kMaxDescriptionLength) {
+    json["description"] = description.substr(0, kMaxDescriptionLength - kTruncationMarker.length()) + kTruncationMarker;
+  } else {
+    json["description"] = description;
+  }
   return json;
 }
 

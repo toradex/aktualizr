@@ -50,6 +50,23 @@ TEST(Types, ResultCode) {
   EXPECT_EQ(data::ResultCode::fromRepr("OK"), data::ResultCode(data::ResultCode::Numeric::kUnknown, "OK"));
 }
 
+TEST(Types, InstallationResultDescriptionCapped) {
+  // Short descriptions are reported verbatim.
+  data::InstallationResult short_res{data::ResultCode::Numeric::kOk, "all good"};
+  EXPECT_EQ(short_res.toJson()["description"].asString(), "all good");
+
+  // Enriched failure reasons (hash mismatches, per-ECU messages aggregated across many ECUs)
+  // can grow large; toJson() caps the description reported to the server and marks it as cut.
+  const std::string long_desc(5000, 'x');
+  const std::string capped =
+      data::InstallationResult{data::ResultCode::Numeric::kInstallFailed, long_desc}.toJson()["description"].asString();
+  EXPECT_LT(capped.length(), long_desc.length());
+  EXPECT_LE(capped.length(), 1024U);
+  EXPECT_NE(capped.find("...[truncated]"), std::string::npos);
+  // The retained portion is the start of the original description.
+  EXPECT_EQ(capped.substr(0, 100), std::string(100, 'x'));
+}
+
 TEST(Types, MergeJsonSingleLevel) {
   Json::Value value1;
   value1["a"] = "aaa";

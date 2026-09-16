@@ -148,7 +148,10 @@ data::InstallationResult OstreeManager::pull(const boost::filesystem::path &sysr
   if (ostree_repo_pull_with_options(repo.get(), alt_remote == nullptr ? remote : alt_remote, options, progress.get(),
                                     mt.cancellable.get(), &error) == 0) {
     LOG_ERROR << "Error while pulling image: " << error->code << " " << error->message;
-    data::InstallationResult install_res(data::ResultCode::Numeric::kInstallFailed, error->message);
+    // The remote pull URL is derived from config.ostree_server, which can be a signed URL; the
+    // libostree error message may echo it, so redact query strings before this reaches a report.
+    data::InstallationResult install_res(data::ResultCode::Numeric::kInstallFailed,
+                                         Utils::redactUrlQueryStrings(error->message));
     g_error_free(error);
     g_variant_unref(options);
     return install_res;
@@ -389,27 +392,37 @@ OstreeManager::OstreeManager(const PackageConfig &pconfig, const BootloaderConfi
 
 OstreeManager::~OstreeManager() { bootloader_.reset(nullptr); }
 
-bool OstreeManager::fetchTarget(const Uptane::Target &target, Uptane::Fetcher &fetcher, const KeyManager &keys,
-                                const FetcherProgressCb &progress_cb, const api::FlowControlToken *token) {
+PackageManagerInterface::FetchResult OstreeManager::fetchTarget(const Uptane::Target &target, Uptane::Fetcher &fetcher,
+                                                                const KeyManager &keys,
+                                                                const FetcherProgressCb &progress_cb,
+                                                                const api::FlowControlToken *token) {
   if (!target.IsOstree()) {
     // The case when the OSTree package manager is set as a package manager for aktualizr
     // while the target is aimed for a Secondary ECU that is configured with another/non-OSTree package manager
     return PackageManagerInterface::fetchTarget(target, fetcher, keys, progress_cb, token);
   }
-  return OstreeManager::pull(config.sysroot, config.ostree_server, keys, target, token, progress_cb).success;
+  const data::InstallationResult pull_result =
+      OstreeManager::pull(config.sysroot, config.ostree_server, keys, target, token, progress_cb);
+  // error is a failure reason; keep it empty on success (description carries success text there).
+  return {pull_result.isSuccess(), pull_result.isSuccess() ? "" : pull_result.description};
 }
 
 #ifdef BUILD_OFFLINE_UPDATES
-bool OstreeManager::fetchTargetOffUpd(const Uptane::Target &target, const Uptane::OfflineUpdateFetcher &fetcher,
-                                      const KeyManager &keys, const FetcherProgressCb &progress_cb,
-                                      const api::FlowControlToken *token) {
+PackageManagerInterface::FetchResult OstreeManager::fetchTargetOffUpd(const Uptane::Target &target,
+                                                                      const Uptane::OfflineUpdateFetcher &fetcher,
+                                                                      const KeyManager &keys,
+                                                                      const FetcherProgressCb &progress_cb,
+                                                                      const api::FlowControlToken *token) {
   if (!target.IsOstree()) {
     // The case when the OSTree package manager is set as a package manager for aktualizr
     // while the target is aimed for a Secondary ECU that is configured with another/non-OSTree package manager
     return PackageManagerInterface::fetchTargetOffUpd(target, fetcher, keys, progress_cb, token);
   }
   auto srcrepo_path = fetcher.getImagesPath() / "ostree";
-  return OstreeManager::pullLocal(config.sysroot, srcrepo_path, target, progress_cb).success;
+  const data::InstallationResult pull_result =
+      OstreeManager::pullLocal(config.sysroot, srcrepo_path, target, progress_cb);
+  // error is a failure reason; keep it empty on success (description carries success text there).
+  return {pull_result.isSuccess(), pull_result.isSuccess() ? "" : pull_result.description};
 }
 #endif
 
@@ -494,7 +507,7 @@ std::string OstreeManager::getCurrentHash() const {
   return ostree_deployment_get_csum(deployment);
 }
 
-bool OstreeManager::hasOstreeDiverged(const std::string& expected_hash) const {
+bool OstreeManager::hasOstreeDiverged(const std::string &expected_hash) const {
   // Kept free of storage access: the caller already holds the current version under the correct
   // ECU serial, whereas resolving the Primary here would depend on the 'ecus' table.
   return expected_hash != getCurrentHash();

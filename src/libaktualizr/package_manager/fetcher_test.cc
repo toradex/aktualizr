@@ -84,7 +84,7 @@ void test_pause(const Uptane::Target& target, const std::string& type = PACKAGE_
 
   do_pause = false;
   std::thread([&target, &fetcher, &download_promise, &token, pacman, &keys]() {
-    bool res = pacman->fetchTarget(target, fetcher, keys, progress_cb, &token);
+    bool res = pacman->fetchTarget(target, fetcher, keys, progress_cb, &token).success;
     download_promise.set_value(res);
   }).detach();
 

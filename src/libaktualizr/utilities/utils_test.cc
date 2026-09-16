@@ -132,6 +132,20 @@ TEST(Utils, FromBase64) {
   EXPECT_EQ(Utils::fromBase64("YWJj"), "abc");
 }
 
+TEST(Utils, RedactUrlQueryStrings) {
+  // A signed URL's query string (which may carry credentials/tokens) is stripped.
+  EXPECT_EQ(Utils::redactUrlQueryStrings("https://host/path?token=secret"), "https://host/path");
+  // URLs without a query string are left untouched.
+  EXPECT_EQ(Utils::redactUrlQueryStrings("https://host/path"), "https://host/path");
+  // A URL embedded in a free-text message (e.g. a libcurl/libostree error) is redacted, and the
+  // rest of the message after the whitespace-terminated URL is preserved.
+  EXPECT_EQ(Utils::redactUrlQueryStrings("While fetching https://host/p?sig=abc def: failed"),
+            "While fetching https://host/p def: failed");
+  // A stray '?' that is not part of a URL is preserved.
+  EXPECT_EQ(Utils::redactUrlQueryStrings("really? yes"), "really? yes");
+  EXPECT_EQ(Utils::redactUrlQueryStrings("no scheme a?b"), "no scheme a?b");
+}
+
 TEST(Utils, FromBase64Wrong) {
   EXPECT_THROW(Utils::fromBase64("Привіт"), boost::archive::iterators::dataflow_exception);
   EXPECT_THROW(Utils::fromBase64("aGVsbG8=="), boost::archive::iterators::dataflow_exception);

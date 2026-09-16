@@ -61,12 +61,23 @@ class PackageManagerInterface {
   virtual void completeInstall() const { throw std::runtime_error("Unimplemented"); }
   virtual data::InstallationResult finalizeInstall(const Uptane::Target& target) = 0;
   virtual void updateNotify() {}
-  virtual bool fetchTarget(const Uptane::Target& target, Uptane::Fetcher& fetcher, const KeyManager& keys,
-                           const FetcherProgressCb& progress_cb, const api::FlowControlToken* token);
+
+  // Outcome of a fetchTarget/fetchTargetOffUpd call: whether it succeeded and, when it
+  // did not, a human-readable reason (curl/HTTP detail, hash mismatch, disk space, ...)
+  // to report to the server. The reason travels in the return value rather than in a
+  // member, so there is no shared state to reason about.
+  struct FetchResult {
+    bool success{false};
+    std::string error;  // failure reason; empty when success is true
+    explicit operator bool() const { return success; }
+  };
+
+  virtual FetchResult fetchTarget(const Uptane::Target& target, Uptane::Fetcher& fetcher, const KeyManager& keys,
+                                  const FetcherProgressCb& progress_cb, const api::FlowControlToken* token);
 #ifdef BUILD_OFFLINE_UPDATES
-  virtual bool fetchTargetOffUpd(const Uptane::Target& target, const Uptane::OfflineUpdateFetcher& fetcher,
-                                 const KeyManager& keys, const FetcherProgressCb& progress_cb,
-                                 const api::FlowControlToken* token);
+  virtual FetchResult fetchTargetOffUpd(const Uptane::Target& target, const Uptane::OfflineUpdateFetcher& fetcher,
+                                        const KeyManager& keys, const FetcherProgressCb& progress_cb,
+                                        const api::FlowControlToken* token);
 #endif
   virtual TargetStatus verifyTarget(const Uptane::Target& target) const;
   virtual bool checkAvailableDiskSpace(uint64_t required_bytes) const;

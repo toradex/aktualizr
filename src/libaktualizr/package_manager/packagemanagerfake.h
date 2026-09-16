@@ -27,8 +27,8 @@ class PackageManagerFake : public PackageManagerInterface {
   void completeInstall() const override;
   data::InstallationResult finalizeInstall(const Uptane::Target &target) override;
   void updateNotify() override { bootloader_->updateNotify(); };
-  bool fetchTarget(const Uptane::Target &target, Uptane::Fetcher &fetcher, const KeyManager &keys,
-                   const FetcherProgressCb &progress_cb, const api::FlowControlToken *token) override;
+  FetchResult fetchTarget(const Uptane::Target &target, Uptane::Fetcher &fetcher, const KeyManager &keys,
+                          const FetcherProgressCb &progress_cb, const api::FlowControlToken *token) override;
 
  private:
   std::unique_ptr<Bootloader> bootloader_;

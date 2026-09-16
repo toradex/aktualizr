@@ -45,6 +45,10 @@ struct Utils {
   static void createDirectories(const boost::filesystem::path &path, mode_t mode);
   static bool createSecureDirectory(const boost::filesystem::path &path);
   static std::string urlEncode(const std::string &input);
+  // Strip the query string from any URL found in the text, so signed-URL credentials/tokens
+  // cannot leak into error messages that are reported to the server. Safe to call on plain URLs
+  // as well as on free-text messages that embed a URL (e.g. libcurl/libostree error strings).
+  static std::string redactUrlQueryStrings(const std::string &input);
   static CURL *curlDupHandleWrapper(CURL *curl_in, bool using_pkcs11);
   static std::vector<boost::filesystem::path> getDirEntriesByExt(const boost::filesystem::path &dir_path,
                                                                  const std::string &ext);
