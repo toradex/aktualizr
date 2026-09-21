@@ -552,7 +552,8 @@ TEST(sqlstorage, SyncPlan) {
 
   const auto plan = SyncPlan::Create(
       "c", {{"primary", "primary-hardware", SyncPlan::Phase::kStaged, false},
-            {"secondary", "secondary-hardware", SyncPlan::Phase::kStaged, false}});
+            {"secondary", "secondary-hardware", SyncPlan::Phase::kStaged, false}},
+      true);
   storage->saveSyncPlan(Utils::jsonToCanonicalStr(plan.toJson()));
 
   std::string json;

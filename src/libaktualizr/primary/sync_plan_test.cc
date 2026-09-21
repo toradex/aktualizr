@@ -8,7 +8,8 @@ namespace {
 
 SyncPlan makePlan() {
   return SyncPlan::Create("corr-1", {{"os", "hw-os", SyncPlan::Phase::kStaged, false},
-                                     {"compose", "hw-compose", SyncPlan::Phase::kStaged, false}});
+                                     {"compose", "hw-compose", SyncPlan::Phase::kStaged, false}},
+                          true);
 }
 
 }  // namespace
@@ -55,6 +56,22 @@ TEST(SyncPlan, JsonRoundTrip) {
   EXPECT_TRUE(loaded.manifestPending());
   EXPECT_TRUE(loaded.members().at(1).install_called);
   EXPECT_EQ(loaded.members().at(1).phase, SyncPlan::Phase::kInstalled);
+}
+
+TEST(SyncPlan, JsonRoundTripPreservesNoOstree) {
+  const SyncPlan plan =
+      SyncPlan::Create("corr-1", {{"a", "hw-a", SyncPlan::Phase::kStaged, false},
+                                  {"b", "hw-b", SyncPlan::Phase::kStaged, false}},
+                       false);
+  const SyncPlan loaded = SyncPlan::fromJson(plan.toJson());
+  EXPECT_FALSE(loaded.ostreeInGroup());
+}
+
+TEST(SyncPlan, FromJsonDefaultsMissingOstreeInGroupToTrue) {
+  Json::Value json = makePlan().toJson();
+  json.removeMember("ostree_in_group");
+  const SyncPlan loaded = SyncPlan::fromJson(json);
+  EXPECT_TRUE(loaded.ostreeInGroup());
 }
 
 TEST(SyncPlan, FromJsonRejectsOneMemberPlan) {

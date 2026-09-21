@@ -17,7 +17,7 @@ class SyncPlan {
     bool install_called{false};
   };
 
-  static SyncPlan Create(const std::string& correlation_id, std::vector<Member> members);
+  static SyncPlan Create(const std::string& correlation_id, std::vector<Member> members, bool ostree_in_group);
 
   void noteInstallStarted(const std::string& serial);
   void noteInstallSucceeded(const std::string& serial);
@@ -35,9 +35,10 @@ class SyncPlan {
   const std::string& correlationId() const { return correlation_id_; }
   Outcome outcome() const { return outcome_; }
   const std::vector<Member>& members() const { return members_; }
+  bool ostreeInGroup() const { return ostree_in_group_; }
 
  private:
-  SyncPlan(std::string correlation_id, std::vector<Member> members);
+  SyncPlan(std::string correlation_id, std::vector<Member> members, bool ostree_in_group);
 
   bool isTerminal() const;
   Member* findMember(const std::string& serial);
@@ -46,6 +47,7 @@ class SyncPlan {
   std::string correlation_id_;
   Outcome outcome_{Outcome::kInProgress};
   bool manifest_sent_{false};
+  bool ostree_in_group_{true};
   std::vector<Member> members_;
 };
 

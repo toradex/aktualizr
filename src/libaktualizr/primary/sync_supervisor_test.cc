@@ -9,7 +9,8 @@ namespace {
 
 SyncPlan makePlan() {
   return SyncPlan::Create("corr-1", {{"os", "hw-os", SyncPlan::Phase::kStaged, false},
-                                     {"compose", "hw-compose", SyncPlan::Phase::kStaged, false}});
+                                     {"compose", "hw-compose", SyncPlan::Phase::kStaged, false}},
+                          true);
 }
 
 SyncPlan makePlanWithOsInstalled() {
@@ -87,9 +88,24 @@ TEST(SyncSupervisor, ThrowsWhenManifestAlreadySent) {
   EXPECT_THROW(NextStep(plan, true, BootObservation::kNewOsBooted), std::logic_error);
 }
 
-TEST(SyncSupervisor, RequiresOstreeInGroup) {
-  SyncPlan plan = makePlan();
-  EXPECT_THROW(NextStep(plan, false, BootObservation::kRebootNotDetected), std::logic_error);
+TEST(SyncSupervisor, NoOstreeAppliesTheFirstStagedMember) {
+  SyncPlan plan = SyncPlan::Create("c",
+                                   {{"a", "hw-a", SyncPlan::Phase::kStaged, false},
+                                    {"b", "hw-b", SyncPlan::Phase::kStaged, false}},
+                                   false);
+  const SupervisorStep step = NextStep(plan, false, BootObservation::kRebootNotDetected);
+  EXPECT_EQ(step.action, SupervisorAction::kApplyNextInstall);
+  EXPECT_EQ(step.serial, "a");
+}
+
+TEST(SyncSupervisor, NoOstreeRollsBackTheLastInstallThatRan) {
+  SyncPlan plan = SyncPlan::Create("c",
+                                   {{"a", "hw-a", SyncPlan::Phase::kInstalled, true},
+                                    {"b", "hw-b", SyncPlan::Phase::kStaged, true}},
+                                   false);
+  const SupervisorStep step = NextStep(plan, false, BootObservation::kNewOsBooted);
+  EXPECT_EQ(step.action, SupervisorAction::kRollbackInstalled);
+  EXPECT_EQ(step.serial, "b");
 }
 
 int main(int argc, char** argv) {

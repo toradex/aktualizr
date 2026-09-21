@@ -2,15 +2,17 @@
 
 #include <stdexcept>
 
-SyncPlan SyncPlan::Create(const std::string& correlation_id, std::vector<Member> members) {
+SyncPlan SyncPlan::Create(const std::string& correlation_id, std::vector<Member> members, bool ostree_in_group) {
   if (members.size() < 2) {
     throw std::runtime_error("sync plan requires at least two members");
   }
-  return SyncPlan(correlation_id, std::move(members));
+  return SyncPlan(correlation_id, std::move(members), ostree_in_group);
 }
 
-SyncPlan::SyncPlan(std::string correlation_id, std::vector<Member> members)
-    : correlation_id_(std::move(correlation_id)), members_(std::move(members)) {}
+SyncPlan::SyncPlan(std::string correlation_id, std::vector<Member> members, bool ostree_in_group)
+    : correlation_id_(std::move(correlation_id)),
+      ostree_in_group_(ostree_in_group),
+      members_(std::move(members)) {}
 
 bool SyncPlan::isTerminal() const { return outcome_ != Outcome::kInProgress; }
 
@@ -121,6 +123,7 @@ Json::Value SyncPlan::toJson() const {
   json["correlation_id"] = correlation_id_;
   json["outcome"] = static_cast<int>(outcome_);
   json["manifest_sent"] = manifest_sent_;
+  json["ostree_in_group"] = ostree_in_group_;
   Json::Value members_json(Json::arrayValue);
   for (const auto& member : members_) {
     Json::Value member_json;
@@ -156,6 +159,9 @@ SyncPlan SyncPlan::fromJson(const Json::Value& json) {
   }
   if (!json.isMember("manifest_sent") || !json["manifest_sent"].isBool()) {
     throw std::runtime_error("missing manifest_sent");
+  }
+  if (json.isMember("ostree_in_group") && !json["ostree_in_group"].isBool()) {
+    throw std::runtime_error("invalid ostree_in_group");
   }
   if (!json.isMember("members") || !json["members"].isArray()) {
     throw std::runtime_error("missing members");
@@ -194,7 +200,8 @@ SyncPlan SyncPlan::fromJson(const Json::Value& json) {
     members.push_back(std::move(member));
   }
 
-  SyncPlan plan = Create(json["correlation_id"].asString(), std::move(members));
+  const bool ostree_in_group = !json.isMember("ostree_in_group") || json["ostree_in_group"].asBool();
+  SyncPlan plan = Create(json["correlation_id"].asString(), std::move(members), ostree_in_group);
   plan.outcome_ = static_cast<Outcome>(outcome_int);
   plan.manifest_sent_ = json["manifest_sent"].asBool();
   return plan;

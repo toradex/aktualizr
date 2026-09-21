@@ -334,7 +334,7 @@ bool SotaUptaneClient::stageSyncGroup(const Uptane::EcuSerial &primary_ecu_seria
     std::vector<SyncPlan::Member> members{
         {primary_ecu_serial.ToString(), primary_hw_id->ToString(), SyncPlan::Phase::kStaged, false},
         {secondary_ecu_serial.ToString(), secondary_hw_id->ToString(), SyncPlan::Phase::kStaged, false}};
-    SyncPlan plan = SyncPlan::Create(correlation_id, std::move(members));
+    SyncPlan plan = SyncPlan::Create(correlation_id, std::move(members), true);
     // The OS deploy has already run; only the reboot and the Secondary apply
     // are left.
     plan.noteInstallStarted(primary_ecu_serial.ToString());
