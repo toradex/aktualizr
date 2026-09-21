@@ -177,6 +177,30 @@ std::string Target::custom_version() const {
   }
 }
 
+boost::optional<std::string> Target::syncGroupId() const {
+  if (!custom_.isMember("sync_group_id")) {
+    return boost::none;
+  }
+  if (!custom_["sync_group_id"].isString()) {
+    throw std::runtime_error("sync_group_id must be a string");
+  }
+  const std::string id = custom_["sync_group_id"].asString();
+  if (id.empty()) {
+    throw std::runtime_error("sync_group_id must be a non-empty string");
+  }
+  return id;
+}
+
+boost::optional<int> Target::syncOrder() const {
+  if (!custom_.isMember("sync_order")) {
+    return boost::none;
+  }
+  if (!custom_["sync_order"].isInt()) {
+    throw std::runtime_error("sync_order must be an integer");
+  }
+  return custom_["sync_order"].asInt();
+}
+
 bool Target::IsOstree() const {
   // NOLINTNEXTLINE(bugprone-branch-clone)
   if (type_ == "OSTREE") {

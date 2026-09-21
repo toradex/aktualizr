@@ -8,6 +8,7 @@
 #include <unordered_map>
 
 #include <boost/filesystem/path.hpp>
+#include <boost/optional.hpp>
 
 #include "json/json.h"
 
@@ -451,6 +452,8 @@ class Target {
   const std::vector<Hash> &hashes() const { return hashes_; }
   const std::vector<HardwareIdentifier> &hardwareIds() const { return hwids_; }
   std::string custom_version() const;
+  boost::optional<std::string> syncGroupId() const;
+  boost::optional<int> syncOrder() const;
   Json::Value custom_data() const { return custom_; }
   void updateCustom(const Json::Value &custom);
   uint64_t length() const { return length_; }

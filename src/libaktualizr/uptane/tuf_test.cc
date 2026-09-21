@@ -283,6 +283,30 @@ TEST(Target, HashMismatch) {
   EXPECT_FALSE(target2.MatchTarget(target1));
 }
 
+TEST(Target, SyncFieldsAbsent) {
+  Uptane::Target target("abc", generateDirectorTarget("hash", 1, {}));
+  EXPECT_FALSE(target.syncGroupId());
+  EXPECT_FALSE(target.syncOrder());
+}
+
+TEST(Target, SyncFieldsPresent) {
+  Json::Value content = generateDirectorTarget("hash", 1, {});
+  content["custom"]["sync_group_id"] = "group-a";
+  content["custom"]["sync_order"] = 2;
+  Uptane::Target target("abc", content);
+  ASSERT_TRUE(target.syncGroupId());
+  EXPECT_EQ(*target.syncGroupId(), "group-a");
+  ASSERT_TRUE(target.syncOrder());
+  EXPECT_EQ(*target.syncOrder(), 2);
+}
+
+TEST(Target, SyncFieldsWrongType) {
+  Json::Value content = generateDirectorTarget("hash", 1, {});
+  content["custom"]["sync_group_id"] = 1;
+  Uptane::Target target("abc", content);
+  EXPECT_THROW(target.syncGroupId(), std::runtime_error);
+}
+
 /* RepositoryType roundtrips via a string, and has the name we expect */
 TEST(RepositoryType, StringRoundTrip) {
   auto d = Uptane::RepositoryType::Director();
