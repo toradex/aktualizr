@@ -15,12 +15,10 @@ class ComposeManager {
   bool up(const boost::filesystem::path &compose_file);
   bool down(const boost::filesystem::path &compose_file);
   bool cleanup();
-  bool checkRollback();
 
  private:
   const std::string compose_cmd_;
   const std::string docker_cmd_;
-  const std::string check_rollback_cmd_;
 };
 
 #endif  // COMPOSE_MANAGER_H_

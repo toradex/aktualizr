@@ -200,12 +200,6 @@ boost::optional<data::InstallationResult> DockerComposeSecondary::completePendin
     return {{data::ResultCode::Numeric::kInternalError, "completePendingInstall can't find composeFileNew()"}};
   }
 
-  if (compose_manager_.checkRollback()) {
-    // The primary failed to install. We are now booted into the old OS image. Fail our installation without attempting
-    // an install. rollbackPendingInstall() will tidy things up
-    return {{data::ResultCode::Numeric::kInstallFailed, "bootloader rolled back OS update"}};
-  }
-
   if (!compose_manager_.up(composeFileNew())) {
     LOG_ERROR << "docker-compose up of new image failed during synchronous update";
     // The primary installed OK, but we failed. Recovery will be in rollbackPendingInstall()
