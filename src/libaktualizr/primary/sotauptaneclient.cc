@@ -428,8 +428,23 @@ bool SotaUptaneClient::applySyncMember(SyncPlan &plan, const Uptane::EcuSerial &
   storage->saveEcuInstallationResult(serial, install_res);
 
   if (install_res.isSuccess()) {
-    plan.noteInstallSucceeded(serial.ToString());
-    saveSyncPlan(plan);
+    bool manifest_matches = false;
+    try {
+      const Uptane::Manifest manifest = secondary_it->second->getManifest();
+      manifest_matches = manifest.verifySignature(secondary_it->second->getPublicKey()) &&
+                         manifest.installedImageHash() == Hash(Hash::Type::kSha256, pending_target->sha256Hash());
+    } catch (const std::exception &ex) {
+      LOG_ERROR << "Could not read the manifest from sync group ECU " << serial << ": " << ex.what();
+    }
+    if (!manifest_matches) {
+      install_res = data::InstallationResult(data::ResultCode::Numeric::kInstallFailed,
+                                             "Secondary manifest does not match the installed target");
+      storage->saveEcuInstallationResult(serial, install_res);
+      LOG_ERROR << "Sync group install on ECU " << serial << " did not match the target manifest";
+    } else {
+      plan.noteInstallSucceeded(serial.ToString());
+      saveSyncPlan(plan);
+    }
   } else {
     LOG_ERROR << "Sync group install failed on ECU " << serial << ": " << install_res.description;
   }
