@@ -19,6 +19,7 @@
 #include "storage/invstorage.h"
 #include "uptane/uptanerepository.h"
 #include "uptane_test_common.h"
+#include "uptane_repo.h"
 #include "utilities/utils.h"
 
 namespace {
@@ -102,6 +103,13 @@ class FailingSecondary : public SecondaryInterface {
   data::InstallationResult install(const Uptane::Target &target, const InstallInfo & /*info*/,
                                    const api::FlowControlToken * /*flow_control*/) override {
     install_calls++;
+    if (observe_plan_storage) {
+      std::string plan;
+      sync_plan_seen_during_install = observe_plan_storage->loadSyncPlan(&plan);
+    }
+    if (install_order != nullptr) {
+      install_order->push_back(getSerial().ToString());
+    }
     return installCommon(target);
   }
 
@@ -150,17 +158,137 @@ class FailingSecondary : public SecondaryInterface {
   bool abort_during_send_firmware{false};
   // When false, primary will not fetch/store image for this secondary (handler-download mode).
   bool needs_image_file_on_primary_{true};
+  std::vector<std::string> *install_order{nullptr};
+  std::shared_ptr<INvStorage> observe_plan_storage;
+  bool sync_plan_seen_during_install{false};
+};
+
+class ExplicitSecondary : public FailingSecondary {
+ public:
+  ExplicitSecondary(Primary::VirtualSecondaryConfig &sconfig_in, bool supports_rollback,
+                    std::vector<std::string> *install_order = nullptr)
+      : FailingSecondary(sconfig_in), supports_rollback_(supports_rollback) {
+    this->install_order = install_order;
+  }
+
+  std::string Type() const override { return "torizon-generic"; }
+  bool supportsRollback() const { return supports_rollback_; }
+
+ private:
+  bool supports_rollback_;
 };
 
 struct TestOptions {
   bool fail_primary_install{false};
   bool primary_installs_on_reboot{true};
+  bool explicit_secondary{false};
+  bool secondary_supports_rollback{false};
+  int explicit_members{0};
 };
+
+std::shared_ptr<HttpFake> makeHttp(const boost::filesystem::path &test_dir, const TestOptions &options) {
+  if (options.explicit_members == 0) {
+    return std::make_shared<HttpFake>(test_dir, "hasupdates");
+  }
+
+  class ExplicitHttpFake final : public HttpFake {
+   public:
+    ExplicitHttpFake(const boost::filesystem::path &dir, int members) : HttpFake(dir), members_(members) {
+      meta_dir = generated_.Path() / "repo";
+    }
+
+    HttpResponse get(const std::string &url, int64_t maxsize, const api::FlowControlToken *flow_control,
+                     const Headers *extra_headers) override {
+      (void)maxsize;
+      (void)extra_headers;
+      prepare();
+      if (flow_control != nullptr && flow_control->hasAborted()) {
+        return HttpResponse("", 0, CURLE_ABORTED_BY_CALLBACK, "Cancelled by FlowControlToken");
+      }
+      const auto file = files_.find(url.substr(tls_server.size()));
+      if (file == files_.end()) {
+        return HttpResponse({}, 404, CURLE_OK, "");
+      }
+      return HttpResponse(file->second, 200, CURLE_OK, "");
+    }
+
+    std::future<HttpResponse> downloadAsync(const std::string &url, curl_write_callback write_cb,
+                                            curl_xferinfo_callback progress_cb, void *userp, curl_off_t from) override {
+      (void)from;
+      prepare();
+      std::promise<HttpResponse> promise;
+      auto future = promise.get_future();
+      const auto file = files_.find(url.substr(tls_server.size()));
+      if (file == files_.end()) {
+        promise.set_value(HttpResponse("", 404, CURLE_OK, ""));
+        return future;
+      }
+      const std::string content = file->second;
+      for (char byte : content) {
+        write_cb(&byte, 1, 1, userp);
+        progress_cb(userp, 0, 0, 0, 0);
+      }
+      promise.set_value(HttpResponse(content, 200, CURLE_OK, ""));
+      return future;
+    }
+
+   private:
+    void prepare() {
+      if (prepared_) {
+        return;
+      }
+      const boost::filesystem::path payload_dir = generated_.Path() / "payloads";
+      boost::filesystem::create_directories(payload_dir);
+      repo_ = std_::make_unique<UptaneRepo>(generated_.Path(), "2029-07-04T16:33:27Z", "id0");
+      repo_->generateRepo(KeyType::kED25519);
+
+      const auto add_target = [this, &payload_dir](const std::string &filename, const std::string &hardware_id,
+                                                  const std::string &serial) {
+        const boost::filesystem::path payload = payload_dir / filename;
+        Utils::writeFile(payload, "explicit sync group payload for " + serial);
+        repo_->addImage(payload, filename, hardware_id);
+        repo_->addTarget(filename, hardware_id, serial);
+      };
+
+      if (members_ == 3) {
+        add_target("primary_firmware.txt", "primary_hw", "CA:FE:A6:D2:84:9D");
+      }
+      add_target("secondary_firmware.txt", "secondary_hw", "secondary_ecu_serial");
+      add_target("generic_firmware.txt", "generic_hw", "generic_ecu_serial");
+      repo_->signTargets();
+      const std::vector<std::string> metadata_files{
+          "repo/1.root.json",       "repo/root.json",      "repo/timestamp.json",
+          "repo/snapshot.json",     "repo/targets.json",   "director/1.root.json",
+          "director/root.json",     "director/targets.json"};
+      const boost::filesystem::path repository_root = generated_.Path() / "repo";
+      for (const auto &file : metadata_files) {
+        files_["/" + file] = Utils::readFile(repository_root / file);
+      }
+      const std::vector<std::string> target_files{
+          "secondary_firmware.txt", "generic_firmware.txt", "primary_firmware.txt"};
+      for (const auto &file : target_files) {
+        const boost::filesystem::path target = repository_root / "repo" / "targets" / file;
+        if (boost::filesystem::exists(target)) {
+          files_["/repo/targets/" + file] = Utils::readFile(target);
+        }
+      }
+      prepared_ = true;
+    }
+
+    TemporaryDirectory generated_;
+    std::unique_ptr<UptaneRepo> repo_;
+    std::map<std::string, std::string> files_;
+    int members_;
+    bool prepared_{false};
+  };
+
+  return std::make_shared<ExplicitHttpFake>(test_dir, options.explicit_members);
+}
 
 struct TestScaffolding {
   explicit TestScaffolding(TestOptions test_options = TestOptions())
       : conf{"tests/config/basic.toml"},
-        http{std::make_shared<HttpFake>(temp_dir.Path(), "hasupdates")},
+        http{makeHttp(temp_dir.Path(), test_options)},
         events_channel{std::make_shared<event::Channel>()} {
     conf.provision.primary_ecu_serial = "CA:FE:A6:D2:84:9D";
     conf.provision.primary_ecu_hardware_id = "primary_hw";
@@ -192,7 +320,11 @@ struct TestScaffolding {
     ecu_config.firmware_path = temp_dir / "firmware.txt";
     ecu_config.target_name_path = temp_dir / "firmware_name.txt";
     ecu_config.metadata_path = temp_dir / "secondary_metadata";
-    secondary = std::make_shared<FailingSecondary>(ecu_config);
+    if (test_options.explicit_secondary) {
+      secondary = std::make_shared<ExplicitSecondary>(ecu_config, test_options.secondary_supports_rollback);
+    } else {
+      secondary = std::make_shared<FailingSecondary>(ecu_config);
+    }
 
     events_channel->connect([this](const std::shared_ptr<event::BaseEvent> &event) {
       events[event->variant]++;
@@ -223,6 +355,33 @@ struct TestScaffolding {
   std::map<std::string, int> events;
   data::ResultCode::Numeric expected_install_report{data::ResultCode::Numeric::kUnknown};
 };
+
+Uptane::Target explicitTarget(Uptane::Target target, const std::string &serial, const std::string &hardware_id,
+                              const std::string &group_id, const boost::optional<int> &order) {
+  Json::Value custom = target.custom_data();
+  custom["ecuIdentifiers"] = Json::Value(Json::objectValue);
+  custom["ecuIdentifiers"][serial]["hardwareId"] = hardware_id;
+  custom["sync_group_id"] = group_id;
+  if (order) {
+    custom["sync_order"] = *order;
+  } else {
+    custom.removeMember("sync_order");
+  }
+  target.updateCustom(custom);
+  return target;
+}
+
+Uptane::Target targetFor(const std::vector<Uptane::Target> &updates, const std::string &serial) {
+  const Uptane::EcuSerial ecu_serial(serial);
+  const auto target = std::find_if(updates.cbegin(), updates.cend(),
+                                   [&ecu_serial](const Uptane::Target &candidate) {
+                                     return candidate.IsForEcu(ecu_serial);
+                                   });
+  if (target == updates.cend()) {
+    throw std::runtime_error("No target for ECU " + serial);
+  }
+  return *target;
+}
 
 }  // anonymous namespace
 
@@ -458,6 +617,150 @@ TEST(UptaneUpdateFailure, SynchronousSecondaryNeedCompletionFailsThePlan) {
   EXPECT_EQ(report["report"]["items"][1]["result"]["code"].asString(), "INSTALL_FAILED");
   EXPECT_EQ(report["report"]["result"]["code"].asString().find("NEED_COMPLETION"), std::string::npos)
       << report["report"]["result"]["code"].asString();
+}
+
+TEST(UptaneUpdateFailure, ExplicitGroupRejectsGenericWithoutRollback) {
+  TestOptions options;
+  options.explicit_secondary = true;
+  TestScaffolding s{options};  // NOLINT
+  ASSERT_NO_THROW(s.dut->initialize());
+
+  const result::UpdateCheck update_result = s.dut->fetchMeta();
+  const result::Download download_result = s.dut->downloadImages(update_result.updates);
+  ASSERT_EQ(download_result.status, result::DownloadStatus::kSuccess);
+
+  const std::vector<Uptane::Target> updates{
+      explicitTarget(targetFor(download_result.updates, s.conf.provision.primary_ecu_serial),
+                     s.conf.provision.primary_ecu_serial, s.conf.provision.primary_ecu_hardware_id, "g", 1),
+      explicitTarget(targetFor(download_result.updates, "secondary_ecu_serial"), "secondary_ecu_serial",
+                     "secondary_hw", "g", 1)};
+
+  s.expected_install_report = data::ResultCode::Numeric::kInternalError;
+  const result::Install install_result = s.dut->uptaneInstall(updates);
+
+  EXPECT_EQ(install_result.dev_report.result_code, data::ResultCode::Numeric::kInternalError);
+  EXPECT_EQ(install_result.dev_report.description, "torizon-generic sync member does not support rollback");
+  std::string plan;
+  EXPECT_FALSE(s.storage->loadSyncPlan(&plan));
+}
+
+TEST(UptaneUpdateFailure, ExplicitGroupInstallsRollbackCapableGenericSameBoot) {
+  TestOptions options;
+  options.primary_installs_on_reboot = false;
+  options.explicit_secondary = true;
+  options.secondary_supports_rollback = true;
+  TestScaffolding s{options};  // NOLINT
+  ASSERT_NO_THROW(s.dut->initialize());
+
+  const result::UpdateCheck update_result = s.dut->fetchMeta();
+  const result::Download download_result = s.dut->downloadImages(update_result.updates);
+  ASSERT_EQ(download_result.status, result::DownloadStatus::kSuccess);
+
+  const std::vector<Uptane::Target> updates{
+      explicitTarget(targetFor(download_result.updates, s.conf.provision.primary_ecu_serial),
+                     s.conf.provision.primary_ecu_serial, s.conf.provision.primary_ecu_hardware_id, "g",
+                     boost::none),
+      explicitTarget(targetFor(download_result.updates, "secondary_ecu_serial"), "secondary_ecu_serial",
+                     "secondary_hw", "g", 1)};
+
+  s.secondary->observe_plan_storage = s.storage;
+  s.expected_install_report = data::ResultCode::Numeric::kOk;
+  const result::Install install_result = s.dut->uptaneInstall(updates);
+
+  EXPECT_TRUE(install_result.dev_report.isSuccess());
+  EXPECT_EQ(s.secondary->install_calls, 1);
+  EXPECT_TRUE(s.secondary->sync_plan_seen_during_install);
+  EXPECT_EQ(s.secondary->rollback_pending_install_calls, 0);
+  std::string plan;
+  EXPECT_FALSE(s.storage->loadSyncPlan(&plan));
+}
+
+TEST(UptaneUpdateFailure, ExplicitThreeWayGroupInstallsSecondariesInOrder) {
+  TestOptions options;
+  options.primary_installs_on_reboot = false;
+  options.explicit_members = 3;
+  TestScaffolding s{options};  // NOLINT
+  ASSERT_NO_THROW(s.dut->initialize());
+
+  std::vector<std::string> install_order;
+  s.secondary->install_order = &install_order;
+
+  Primary::VirtualSecondaryConfig generic_config;
+  generic_config.partial_verifying = false;
+  generic_config.full_client_dir = s.temp_dir.Path();
+  generic_config.ecu_serial = "generic_ecu_serial";
+  generic_config.ecu_hardware_id = "generic_hw";
+  generic_config.ecu_private_key = "generic.priv";
+  generic_config.ecu_public_key = "generic.pub";
+  generic_config.firmware_path = s.temp_dir / "generic-firmware.txt";
+  generic_config.target_name_path = s.temp_dir / "generic-firmware-name.txt";
+  generic_config.metadata_path = s.temp_dir / "generic_metadata";
+  auto generic = std::make_shared<ExplicitSecondary>(generic_config, true, &install_order);
+  s.dut->addSecondary(generic);
+
+  const result::UpdateCheck update_result = s.dut->fetchMeta();
+  const result::Download download_result = s.dut->downloadImages(update_result.updates);
+  ASSERT_EQ(download_result.status, result::DownloadStatus::kSuccess);
+
+  std::vector<Uptane::Target> updates{
+      explicitTarget(targetFor(download_result.updates, s.conf.provision.primary_ecu_serial),
+                     s.conf.provision.primary_ecu_serial, s.conf.provision.primary_ecu_hardware_id, "g", 3),
+      explicitTarget(targetFor(download_result.updates, "secondary_ecu_serial"), "secondary_ecu_serial",
+                     "secondary_hw", "g", 1),
+      explicitTarget(targetFor(download_result.updates, "generic_ecu_serial"), "generic_ecu_serial", "generic_hw",
+                     "g", 2)};
+
+  s.expected_install_report = data::ResultCode::Numeric::kOk;
+  const result::Install install_result = s.dut->uptaneInstall(updates);
+
+  EXPECT_TRUE(install_result.dev_report.isSuccess());
+  EXPECT_EQ(s.secondary->install_calls, 1);
+  EXPECT_EQ(generic->install_calls, 1);
+  EXPECT_EQ(install_order, (std::vector<std::string>{"secondary_ecu_serial", "generic_ecu_serial"}));
+}
+
+TEST(UptaneUpdateFailure, ExplicitNoOstreeTwoGenericRollsBackFirstAfterSecondFails) {
+  TestOptions options;
+  options.explicit_secondary = true;
+  options.secondary_supports_rollback = true;
+  options.explicit_members = 2;
+  TestScaffolding s{options};  // NOLINT
+  ASSERT_NO_THROW(s.dut->initialize());
+
+  Primary::VirtualSecondaryConfig second_config;
+  second_config.partial_verifying = false;
+  second_config.full_client_dir = s.temp_dir.Path();
+  second_config.ecu_serial = "generic_ecu_serial";
+  second_config.ecu_hardware_id = "generic_hw";
+  second_config.ecu_private_key = "generic.priv";
+  second_config.ecu_public_key = "generic.pub";
+  second_config.firmware_path = s.temp_dir / "generic-firmware.txt";
+  second_config.target_name_path = s.temp_dir / "generic-firmware-name.txt";
+  second_config.metadata_path = s.temp_dir / "generic_metadata";
+  auto second = std::make_shared<ExplicitSecondary>(second_config, true);
+  second->install_result = data::ResultCode::Numeric::kInstallFailed;
+  s.dut->addSecondary(second);
+
+  const result::UpdateCheck update_result = s.dut->fetchMeta();
+  const result::Download download_result = s.dut->downloadImages(update_result.updates);
+  ASSERT_EQ(download_result.status, result::DownloadStatus::kSuccess);
+
+  const std::vector<Uptane::Target> updates{
+      explicitTarget(targetFor(download_result.updates, "secondary_ecu_serial"), "secondary_ecu_serial",
+                     "secondary_hw", "g", 1),
+      explicitTarget(targetFor(download_result.updates, "generic_ecu_serial"), "generic_ecu_serial", "generic_hw",
+                     "g", 2)};
+
+  s.expected_install_report = data::ResultCode::Numeric::kInstallFailed;
+  const result::Install install_result = s.dut->uptaneInstall(updates);
+
+  EXPECT_FALSE(install_result.dev_report.isSuccess());
+  EXPECT_EQ(s.secondary->install_calls, 1);
+  EXPECT_EQ(second->install_calls, 1);
+  EXPECT_EQ(s.secondary->rollback_pending_install_calls, 1);
+  EXPECT_EQ(second->rollback_pending_install_calls, 0);
+  std::string plan;
+  EXPECT_FALSE(s.storage->loadSyncPlan(&plan));
 }
 
 /**

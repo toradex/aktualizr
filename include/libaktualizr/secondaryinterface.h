@@ -101,6 +101,7 @@ class SecondaryInterface {
    * Called after completePendingInstall if the install failed.
    */
   virtual void rollbackPendingInstall() {}
+  virtual bool supportsRollback() const { return false; }
 
 #ifdef BUILD_OFFLINE_UPDATES
   virtual data::InstallationResult putMetadataOffUpd(const Uptane::Target& target,

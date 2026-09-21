@@ -44,6 +44,7 @@ class TorizonGenericSecondary : public ManagedSecondary {
     return completeInstall(target);
   }
   void rollbackPendingInstall() override;
+  bool supportsRollback() const override { return config_.supports_rollback; }
 
  protected:
   using VarMap = std::unordered_map<std::string, std::string>;

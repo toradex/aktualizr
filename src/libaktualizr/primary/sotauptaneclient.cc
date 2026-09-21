@@ -31,6 +31,7 @@ static const std::vector<std::string> IMAGE_REPO_MERGE_IGNORE{"hardwareIds", "ta
 // SecondaryInterface::Type() of the docker-compose Secondary. Spelled out here
 // because libaktualizr cannot depend on the Torizon Secondary implementations.
 static const char *const DOCKER_COMPOSE_SECONDARY_TYPE = "docker-compose";
+static const char *const TORIZON_GENERIC_SECONDARY_TYPE = "torizon-generic";
 
 static void report_progress_cb(event::Channel *channel, const Uptane::Target &target, const std::string &description,
                                unsigned int progress) {
@@ -313,17 +314,9 @@ void SotaUptaneClient::saveSyncPlan(const SyncPlan &plan) {
   storage->saveSyncPlan(Utils::jsonToCanonicalStr(plan.toJson()));
 }
 
-bool SotaUptaneClient::stageSyncGroup(const Uptane::EcuSerial &primary_ecu_serial,
-                                      const Uptane::EcuSerial &secondary_ecu_serial,
-                                      const Uptane::Target &secondary_target,
+bool SotaUptaneClient::stageSyncGroup(const ResolvedSyncGroup &group,
+                                      const std::vector<SecondaryEcuInstallationJob> &secondary_installs,
                                       const Uptane::CorrelationId &correlation_id) {
-  const boost::optional<Uptane::HardwareIdentifier> primary_hw_id = getEcuHwId(primary_ecu_serial);
-  const boost::optional<Uptane::HardwareIdentifier> secondary_hw_id = getEcuHwId(secondary_ecu_serial);
-  if (!primary_hw_id || !secondary_hw_id) {
-    LOG_ERROR << "Cannot stage a sync group without hardware IDs for both ECUs";
-    return false;
-  }
-
   std::string existing_plan;
   if (storage->loadSyncPlan(&existing_plan)) {
     LOG_ERROR << "Refusing to replace a sync plan that has not been cleared";
@@ -331,33 +324,42 @@ bool SotaUptaneClient::stageSyncGroup(const Uptane::EcuSerial &primary_ecu_seria
   }
 
   try {
-    std::vector<SyncPlan::Member> members{
-        {primary_ecu_serial.ToString(), primary_hw_id->ToString(), SyncPlan::Phase::kStaged, false},
-        {secondary_ecu_serial.ToString(), secondary_hw_id->ToString(), SyncPlan::Phase::kStaged, false}};
-    SyncPlan plan = SyncPlan::Create(correlation_id, std::move(members), true);
-    // The OS deploy has already run; only the reboot and the Secondary apply
-    // are left.
-    plan.noteInstallStarted(primary_ecu_serial.ToString());
-    plan.noteInstallSucceeded(primary_ecu_serial.ToString());
+    std::vector<SyncPlan::Member> members;
+    members.reserve(group.serials.size());
+    for (const auto &serial : group.serials) {
+      const boost::optional<Uptane::HardwareIdentifier> hardware_id = getEcuHwId(Uptane::EcuSerial(serial));
+      if (!hardware_id) {
+        LOG_ERROR << "Cannot stage a sync group without a hardware ID for ECU " << serial;
+        return false;
+      }
+      members.push_back({serial, hardware_id->ToString(), SyncPlan::Phase::kStaged, false});
+    }
+    SyncPlan plan = SyncPlan::Create(correlation_id, std::move(members), group.ostree_in_group);
+    if (group.ostree_in_group) {
+      const std::string primary_serial = primaryEcuSerial().ToString();
+      plan.noteInstallStarted(primary_serial);
+      plan.noteInstallSucceeded(primary_serial);
+    }
     saveSyncPlan(plan);
   } catch (const std::exception &ex) {
     LOG_ERROR << "Could not create the sync plan: " << ex.what();
     return false;
   }
 
-  // Keep the Secondary pending so startupCleanSecondaries() leaves its staged
-  // payload alone across the reboot.
-  storage->saveInstalledVersion(secondary_ecu_serial.ToString(), secondary_target,
-                                InstalledVersionUpdateMode::kPending, correlation_id);
+  for (const auto &install : secondary_installs) {
+    storage->saveInstalledVersion(install.ecu_serial().ToString(), install.target(),
+                                  InstalledVersionUpdateMode::kPending, correlation_id);
+  }
   return true;
 }
 
 void SotaUptaneClient::runSyncPlan(SyncPlan &plan, BootObservation boot, const Uptane::CorrelationId &correlation_id,
-                                  const boost::optional<data::InstallationResult> &primary_finalize) {
+                                  const boost::optional<data::InstallationResult> &primary_finalize,
+                                  data::InstallationResult *final_result, std::string *raw_report) {
   for (;;) {
     SupervisorStep step{SupervisorAction::kWaitForReboot, {}};
     try {
-      step = NextStep(plan, true, boot);
+      step = NextStep(plan, plan.ostreeInGroup(), boot);
     } catch (const std::exception &ex) {
       LOG_ERROR << "Abandoning a sync plan in an unexpected state: " << ex.what();
       storage->clearSyncPlan();
@@ -373,18 +375,18 @@ void SotaUptaneClient::runSyncPlan(SyncPlan &plan, BootObservation boot, const U
         if (!applySyncMember(plan, Uptane::EcuSerial(step.serial))) {
           // The new OS is live but the group can never complete, so it has to
           // go back rather than report a success the device does not have.
-          abortSyncPlan(plan, correlation_id);
+          abortSyncPlan(plan, correlation_id, final_result, raw_report);
           return;
         }
         break;
       case SupervisorAction::kRollbackInstalled:
-        rollbackSyncMember(plan, Uptane::EcuSerial(step.serial), correlation_id);
+        rollbackSyncMember(plan, Uptane::EcuSerial(step.serial), correlation_id, final_result, raw_report);
         return;
       case SupervisorAction::kFailAndReport:
-        failSyncPlan(plan, correlation_id);
+        failSyncPlan(plan, correlation_id, final_result, raw_report);
         return;
       case SupervisorAction::kCommitAndReport:
-        commitSyncPlan(plan, correlation_id, primary_finalize);
+        commitSyncPlan(plan, correlation_id, primary_finalize, final_result, raw_report);
         return;
       case SupervisorAction::kRetryManifest:
         sendSyncPlanManifest(plan);
@@ -452,30 +454,46 @@ bool SotaUptaneClient::applySyncMember(SyncPlan &plan, const Uptane::EcuSerial &
 }
 
 void SotaUptaneClient::rollbackSyncMember(SyncPlan &plan, const Uptane::EcuSerial &serial,
-                                          const Uptane::CorrelationId &correlation_id) {
+                                          const Uptane::CorrelationId &correlation_id,
+                                          data::InstallationResult *final_result, std::string *raw_report) {
+  (void)serial;
   const auto &members = plan.members();
-  const auto member_it =
-      std::find_if(members.cbegin(), members.cend(),
-                   [&serial](const SyncPlan::Member &m) { return m.serial == serial.ToString(); });
-  if (member_it != members.cend()) {
+  for (auto member_it = members.crbegin(); member_it != members.crend(); ++member_it) {
     try {
       rollbackAppliedSyncMember(*member_it);
     } catch (const std::exception &ex) {
-      LOG_ERROR << "Rollback of sync group ECU " << serial << " failed: " << ex.what();
+      LOG_ERROR << "Rollback of sync group ECU " << member_it->serial << " failed: " << ex.what();
     }
   }
 
-  if (!armOsRollback()) {
-    return;
+  if (plan.ostreeInGroup()) {
+    if (!armOsRollback()) {
+      return;
+    }
   }
 
   plan.markFailed();
   saveSyncPlan(plan);
   clearSyncMembersPending(plan, correlation_id);
-  rebootForOsRollback();
+  data::InstallationResult stored_result;
+  std::string stored_raw_report;
+  std::string result_correlation_id;
+  storage->loadDeviceInstallationResult(&stored_result, &stored_raw_report, &result_correlation_id);
+  if (final_result != nullptr) {
+    *final_result = stored_result;
+  }
+  if (raw_report != nullptr) {
+    *raw_report = stored_raw_report;
+  }
+  if (plan.ostreeInGroup()) {
+    rebootForOsRollback();
+  } else {
+    sendSyncPlanManifest(plan);
+  }
 }
 
-void SotaUptaneClient::abortSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id) {
+void SotaUptaneClient::abortSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id,
+                                    data::InstallationResult *final_result, std::string *raw_report) {
   const auto &members = plan.members();
   for (auto it = members.crbegin(); it != members.crend(); ++it) {
     try {
@@ -485,18 +503,36 @@ void SotaUptaneClient::abortSyncPlan(SyncPlan &plan, const Uptane::CorrelationId
     }
   }
 
-  if (!armOsRollback()) {
-    return;
+  if (plan.ostreeInGroup()) {
+    if (!armOsRollback()) {
+      return;
+    }
   }
 
   plan.markFailed();
-  // The OS is going back, so the Primary belongs to this failure as well.
-  storage->saveEcuInstallationResult(
-      primaryEcuSerial(), data::InstallationResult(data::ResultCode::Numeric::kInstallFailed,
-                                                   "The synchronous update this ECU belonged to failed"));
+  if (plan.ostreeInGroup()) {
+    // The OS is going back, so the Primary belongs to this failure as well.
+    storage->saveEcuInstallationResult(
+        primaryEcuSerial(), data::InstallationResult(data::ResultCode::Numeric::kInstallFailed,
+                                                     "The synchronous update this ECU belonged to failed"));
+  }
   clearSyncMembersPending(plan, correlation_id);
   saveSyncPlan(plan);
-  rebootForOsRollback();
+  data::InstallationResult stored_result;
+  std::string stored_raw_report;
+  std::string result_correlation_id;
+  storage->loadDeviceInstallationResult(&stored_result, &stored_raw_report, &result_correlation_id);
+  if (final_result != nullptr) {
+    *final_result = stored_result;
+  }
+  if (raw_report != nullptr) {
+    *raw_report = stored_raw_report;
+  }
+  if (plan.ostreeInGroup()) {
+    rebootForOsRollback();
+  } else {
+    sendSyncPlanManifest(plan);
+  }
 }
 
 void SotaUptaneClient::rollbackAppliedSyncMember(const SyncPlan::Member &member) {
@@ -506,6 +542,12 @@ void SotaUptaneClient::rollbackAppliedSyncMember(const SyncPlan::Member &member)
   }
   const auto secondary_it = secondaries.find(Uptane::EcuSerial(member.serial));
   if (secondary_it == secondaries.end()) {
+    return;
+  }
+  // The docker-compose rollback hook also cleans up a failed or incomplete
+  // install attempt. Generic rollback is only valid after a successful install.
+  if (member.phase != SyncPlan::Phase::kInstalled &&
+      secondary_it->second->Type() != DOCKER_COMPOSE_SECONDARY_TYPE) {
     return;
   }
   LOG_INFO << "Rolling back the sync group install on ECU " << member.serial;
@@ -529,10 +571,21 @@ void SotaUptaneClient::rebootForOsRollback() {
   bootloader.reboot();
 }
 
-void SotaUptaneClient::failSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id) {
+void SotaUptaneClient::failSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id,
+                                   data::InstallationResult *final_result, std::string *raw_report) {
   plan.markFailed();
   saveSyncPlan(plan);
   clearSyncMembersPending(plan, correlation_id);
+  data::InstallationResult stored_result;
+  std::string stored_raw_report;
+  std::string result_correlation_id;
+  storage->loadDeviceInstallationResult(&stored_result, &stored_raw_report, &result_correlation_id);
+  if (final_result != nullptr) {
+    *final_result = stored_result;
+  }
+  if (raw_report != nullptr) {
+    *raw_report = stored_raw_report;
+  }
 
   // Nothing of this group is live any more, so let the Secondaries drop the
   // staging they were holding for it.
@@ -551,7 +604,8 @@ void SotaUptaneClient::failSyncPlan(SyncPlan &plan, const Uptane::CorrelationId 
 }
 
 void SotaUptaneClient::commitSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id,
-                                     const boost::optional<data::InstallationResult> &primary_finalize) {
+                                     const boost::optional<data::InstallationResult> &primary_finalize,
+                                     data::InstallationResult *final_result, std::string *raw_report_out) {
   try {
     plan.markCommitted();
   } catch (const std::exception &ex) {
@@ -581,6 +635,12 @@ void SotaUptaneClient::commitSyncPlan(SyncPlan &plan, const Uptane::CorrelationI
   std::string raw_report;
   computeDeviceInstallationResult(&ir, &raw_report);
   storage->storeDeviceInstallationResult(ir, raw_report, correlation_id);
+  if (final_result != nullptr) {
+    *final_result = ir;
+  }
+  if (raw_report_out != nullptr) {
+    *raw_report_out = raw_report;
+  }
   sendSyncPlanManifest(plan);
 }
 
@@ -1724,11 +1784,50 @@ result::Install SotaUptaneClient::uptaneInstall(const std::vector<Uptane::Target
       }
     }
 
-    // Torizon auto sync group: one Primary install plus one docker-compose
-    // Secondary are applied as a single atomic group.
-    const bool auto_sync_group = primary_installs.size() == 1 && secondary_installs.size() == 1 &&
-                                 isDockerComposeSecondary(secondary_installs.front().ecu_serial());
+    std::vector<SyncCandidate> sync_candidates;
+    sync_candidates.reserve(primary_installs.size() + secondary_installs.size());
+    try {
+      for (const auto &target : primary_installs) {
+        SyncCandidate candidate;
+        candidate.serial = primary_ecu_serial.ToString();
+        const boost::optional<Uptane::HardwareIdentifier> hardware_id = getEcuHwId(primary_ecu_serial);
+        candidate.hardware_id = hardware_id ? hardware_id->ToString() : std::string();
+        candidate.is_ostree = true;
+        candidate.sync_group_id = target.syncGroupId();
+        candidate.sync_order = target.syncOrder();
+        sync_candidates.push_back(std::move(candidate));
+      }
+      for (const auto &install : secondary_installs) {
+        SyncCandidate candidate;
+        candidate.serial = install.ecu_serial().ToString();
+        const boost::optional<Uptane::HardwareIdentifier> hardware_id = getEcuHwId(install.ecu_serial());
+        candidate.hardware_id = hardware_id ? hardware_id->ToString() : std::string();
+        const auto secondary = secondaries.find(install.ecu_serial());
+        if (secondary != secondaries.end()) {
+          candidate.is_docker_compose = secondary->second->Type() == DOCKER_COMPOSE_SECONDARY_TYPE;
+          candidate.is_torizon_generic = secondary->second->Type() == TORIZON_GENERIC_SECONDARY_TYPE;
+          candidate.supports_rollback = secondary->second->supportsRollback();
+        }
+        candidate.sync_group_id = install.target().syncGroupId();
+        candidate.sync_order = install.target().syncOrder();
+        sync_candidates.push_back(std::move(candidate));
+      }
+    } catch (const std::exception &ex) {
+      result.dev_report = data::InstallationResult(data::ResultCode::Numeric::kInternalError, ex.what());
+      return std::make_tuple(result, ex.what());
+    }
+
+    const ResolvedSyncGroup sync_group = ResolveSyncGroup(sync_candidates);
+    if (sync_group.kind == SyncResolveKind::kReject) {
+      result.dev_report =
+          data::InstallationResult(data::ResultCode::Numeric::kInternalError, sync_group.reject_reason);
+      return std::make_tuple(result, sync_group.reject_reason);
+    }
+    if (sync_group.ostree_order_overridden) {
+      LOG_WARNING << "OSTree sync_order overridden; the OS installs first";
+    }
     bool sync_group_staged = false;
+    bool sync_group_ran = false;
 
     //   6 - send metadata to all the ECUs
     data::InstallationResult metadata_res;
@@ -1763,6 +1862,7 @@ result::Install SotaUptaneClient::uptaneInstall(const std::vector<Uptane::Target
 
     //   7 - send images to ECUs (deploy for OSTree)
     bool primary_install_failed = false;
+    boost::optional<data::InstallationResult> primary_install_result;
     if (!primary_installs.empty()) {
       // assuming one OSTree OS per Primary => there can be only one OSTree update
       Uptane::Target const primary_update = primary_installs[0];
@@ -1775,16 +1875,11 @@ result::Install SotaUptaneClient::uptaneInstall(const std::vector<Uptane::Target
       //   a false notification doesn't hurt when rollbacks are implemented
       package_manager_->updateNotify();
       install_res = PackageInstallSetResult(primary_update, correlation_id);
+      primary_install_result = install_res;
       if (install_res.result_code.num_code == data::ResultCode::Numeric::kNeedCompletion) {
         // update needs a reboot, send distinct EcuInstallationApplied event
         report_queue->enqueue(std_::make_unique<EcuInstallationAppliedReport>(primary_ecu_serial, correlation_id));
         sendEvent<event::InstallTargetComplete>(primary_ecu_serial, true);
-        if (auto_sync_group) {
-          // The OS is staged for the next boot, so the Secondary must not go
-          // live until we know that boot worked.
-          sync_group_staged = stageSyncGroup(primary_ecu_serial, secondary_installs.front().ecu_serial(),
-                                             secondary_installs.front().target(), correlation_id);
-        }
       } else if (install_res.result_code.num_code == data::ResultCode::Numeric::kOk) {
         storage->saveEcuInstallationResult(primary_ecu_serial, install_res);
         report_queue->enqueue(
@@ -1803,9 +1898,36 @@ result::Install SotaUptaneClient::uptaneInstall(const std::vector<Uptane::Target
       LOG_INFO << "No update to install on Primary";
     }
 
+    if (sync_group.kind == SyncResolveKind::kGroup && !primary_install_failed) {
+      sync_group_staged = stageSyncGroup(sync_group, secondary_installs, correlation_id);
+      if (!sync_group_staged) {
+        result.dev_report =
+            data::InstallationResult(data::ResultCode::Numeric::kInternalError, "Could not stage the sync group");
+        return std::make_tuple(result, "Could not stage the sync group");
+      }
+
+      const bool can_apply_now =
+          !sync_group.ostree_in_group ||
+          (primary_install_result &&
+           primary_install_result->result_code.num_code == data::ResultCode::Numeric::kOk);
+      if (can_apply_now) {
+        boost::optional<SyncPlan> plan = loadSyncPlan();
+        if (!plan) {
+          result.dev_report =
+              data::InstallationResult(data::ResultCode::Numeric::kInternalError, "Could not load the sync plan");
+          return std::make_tuple(result, "Could not load the sync plan");
+        }
+        runSyncPlan(*plan, BootObservation::kNewOsBooted, correlation_id, boost::none, &result.dev_report, &rr);
+        sync_group_ran = true;
+      }
+    }
+
     // Install on secondaries
     if (sync_group_staged) {
-      LOG_INFO << "The Secondary in the sync group will be installed after the reboot into the new OS";
+      if (sync_group.ostree_in_group && primary_install_result &&
+          primary_install_result->result_code.num_code == data::ResultCode::Numeric::kNeedCompletion) {
+        LOG_INFO << "The Secondaries in the sync group will be installed after the reboot into the new OS";
+      }
     } else if (!primary_install_failed) {
       // Record the fact we are starting an installation, mirroring the logic in
       // SotaUptaneClient::PackageInstallSetResult. See the comments there for
@@ -1845,7 +1967,9 @@ result::Install SotaUptaneClient::uptaneInstall(const std::vector<Uptane::Target
       LOG_WARNING << "Skipping installation on secondaries since primary install failed";
     }
 
-    computeDeviceInstallationResult(&result.dev_report, &rr);
+    if (!sync_group_ran) {
+      computeDeviceInstallationResult(&result.dev_report, &rr);
+    }
 
     return std::make_tuple(result, rr);
   }();

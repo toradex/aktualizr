@@ -44,6 +44,7 @@ class DockerComposeSecondary : public ManagedSecondary {
                                    const api::FlowControlToken* flow_control) override;
   boost::optional<data::InstallationResult> completePendingInstall(const Uptane::Target& target) override;
   void rollbackPendingInstall() override;
+  bool supportsRollback() const override { return true; }
   void cleanStartup() override;
 
  protected:

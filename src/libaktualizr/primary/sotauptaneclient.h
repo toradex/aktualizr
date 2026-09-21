@@ -27,6 +27,7 @@
 #include "primary/consent.h"
 #include "primary/offline_logs_manager.h"
 #include "primary/online_logs_uploader.h"
+#include "primary/sync_group.h"
 #include "primary/sync_plan.h"
 #include "primary/sync_supervisor.h"
 #include "provisioner.h"
@@ -38,6 +39,8 @@
 #include "uptane/manifest.h"
 #include "uptane/tuf.h"
 #include "utilities/flow_control.h"
+
+class SecondaryEcuInstallationJob;
 
 class SotaUptaneClient {
  public:
@@ -210,28 +213,32 @@ class SotaUptaneClient {
   void startupCleanSecondaries();
   void checkAndUpdatePendingSecondaries();
 
-  // Sync groups. Phase 1 only recognises the Torizon auto group: a single
-  // Primary install plus a single docker-compose Secondary are applied
-  // atomically even though the Director metadata does not describe a group.
+  // Sync groups.
   bool isDockerComposeSecondary(const Uptane::EcuSerial &serial) const;
-  bool stageSyncGroup(const Uptane::EcuSerial &primary_ecu_serial, const Uptane::EcuSerial &secondary_ecu_serial,
-                      const Uptane::Target &secondary_target, const Uptane::CorrelationId &correlation_id);
+  bool stageSyncGroup(const ResolvedSyncGroup &group,
+                      const std::vector<SecondaryEcuInstallationJob> &secondary_installs,
+                      const Uptane::CorrelationId &correlation_id);
   boost::optional<SyncPlan> loadSyncPlan() const;
   void saveSyncPlan(const SyncPlan &plan);
   void runSyncPlan(SyncPlan &plan, BootObservation boot, const Uptane::CorrelationId &correlation_id,
-                   const boost::optional<data::InstallationResult> &primary_finalize);
+                   const boost::optional<data::InstallationResult> &primary_finalize,
+                   data::InstallationResult *final_result = nullptr, std::string *raw_report = nullptr);
   bool applySyncMember(SyncPlan &plan, const Uptane::EcuSerial &serial);
-  void rollbackSyncMember(SyncPlan &plan, const Uptane::EcuSerial &serial, const Uptane::CorrelationId &correlation_id);
+  void rollbackSyncMember(SyncPlan &plan, const Uptane::EcuSerial &serial, const Uptane::CorrelationId &correlation_id,
+                          data::InstallationResult *final_result = nullptr, std::string *raw_report = nullptr);
   void rollbackAppliedSyncMember(const SyncPlan::Member &member);
-  void abortSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id);
+  void abortSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id,
+                     data::InstallationResult *final_result = nullptr, std::string *raw_report = nullptr);
   // Returns false when the bootloader rollback flag could not be set. The
   // caller must not reboot or mark the plan failed in that case.
   bool armOsRollback();
   void rebootForOsRollback();
-  void failSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id);
+  void failSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id,
+                    data::InstallationResult *final_result = nullptr, std::string *raw_report = nullptr);
   void clearSyncMembersPending(const SyncPlan &plan, const Uptane::CorrelationId &correlation_id);
   void commitSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id,
-                      const boost::optional<data::InstallationResult> &primary_finalize);
+                      const boost::optional<data::InstallationResult> &primary_finalize,
+                      data::InstallationResult *final_result = nullptr, std::string *raw_report = nullptr);
   bool sendSyncPlanManifest(SyncPlan &plan);
 
   Uptane::EcuSerial primaryEcuSerial() { return provisioner_.PrimaryEcuSerial(); }
