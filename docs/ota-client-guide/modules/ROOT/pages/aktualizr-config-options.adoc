@@ -211,5 +211,6 @@ Options for configuring boot-specific behavior
 | `reboot_sentinel_dir`  | `"/var/run/aktualizr-session"`  | Base directory for reboot detection sentinel. Must reside in a temporary file system.
 | `reboot_sentinel_name` | `"need_reboot"`                 | Name of the reboot detection sentinel.
 | `reboot_command`       | `"/sbin/reboot"`                | Command to reboot the system after update completes. Applicable only if `uptane::force_install_completion` is set to `true`.
+| `rollback_command`     | `"fw_setenv rollback 1"`        | Command that arms a bootloader rollback of the OS after a sync group fails. The device is rebooted only if this command succeeds.
 |==========================================================================================
 

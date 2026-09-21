@@ -177,6 +177,7 @@ struct BootloaderConfig {
   boost::filesystem::path reboot_sentinel_dir{"/var/run/aktualizr-session"};
   boost::filesystem::path reboot_sentinel_name{"need_reboot"};
   std::string reboot_command{"/sbin/reboot"};
+  std::string rollback_command{"fw_setenv rollback 1"};
   boost::filesystem::path grub_envfile{"/media/efi/EFI/BOOT/grubenv"};
 
   void updateFromPropertyTree(const boost::property_tree::ptree& pt);

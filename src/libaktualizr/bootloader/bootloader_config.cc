@@ -43,6 +43,7 @@ void BootloaderConfig::updateFromPropertyTree(const boost::property_tree::ptree&
   CopyFromConfig(reboot_sentinel_dir, "reboot_sentinel_dir", pt);
   CopyFromConfig(reboot_sentinel_name, "reboot_sentinel_name", pt);
   CopyFromConfig(reboot_command, "reboot_command", pt);
+  CopyFromConfig(rollback_command, "rollback_command", pt);
   CopyFromConfig(grub_envfile, "grub_envfile", pt);
 }
 
@@ -51,5 +52,6 @@ void BootloaderConfig::writeToStream(std::ostream& out_stream) const {
   writeOption(out_stream, reboot_sentinel_dir, "reboot_sentinel_dir");
   writeOption(out_stream, reboot_sentinel_name, "reboot_sentinel_name");
   writeOption(out_stream, reboot_command, "reboot_command");
+  writeOption(out_stream, rollback_command, "rollback_command");
   writeOption(out_stream, grub_envfile, "grub_envfile");
 }

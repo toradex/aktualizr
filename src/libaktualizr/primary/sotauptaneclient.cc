@@ -443,20 +443,35 @@ void SotaUptaneClient::rollbackSyncMember(SyncPlan &plan, const Uptane::EcuSeria
       std::find_if(members.cbegin(), members.cend(),
                    [&serial](const SyncPlan::Member &m) { return m.serial == serial.ToString(); });
   if (member_it != members.cend()) {
-    rollbackAppliedSyncMember(*member_it);
+    try {
+      rollbackAppliedSyncMember(*member_it);
+    } catch (const std::exception &ex) {
+      LOG_ERROR << "Rollback of sync group ECU " << serial << " failed: " << ex.what();
+    }
+  }
+
+  if (!armOsRollback()) {
+    return;
   }
 
   plan.markFailed();
   saveSyncPlan(plan);
   clearSyncMembersPending(plan, correlation_id);
-
-  triggerOsRollback();
+  rebootForOsRollback();
 }
 
 void SotaUptaneClient::abortSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id) {
   const auto &members = plan.members();
   for (auto it = members.crbegin(); it != members.crend(); ++it) {
-    rollbackAppliedSyncMember(*it);
+    try {
+      rollbackAppliedSyncMember(*it);
+    } catch (const std::exception &ex) {
+      LOG_ERROR << "Rollback of sync group ECU " << it->serial << " failed: " << ex.what();
+    }
+  }
+
+  if (!armOsRollback()) {
+    return;
   }
 
   plan.markFailed();
@@ -466,8 +481,7 @@ void SotaUptaneClient::abortSyncPlan(SyncPlan &plan, const Uptane::CorrelationId
                                                    "The synchronous update this ECU belonged to failed"));
   clearSyncMembersPending(plan, correlation_id);
   saveSyncPlan(plan);
-
-  triggerOsRollback();
+  rebootForOsRollback();
 }
 
 void SotaUptaneClient::rollbackAppliedSyncMember(const SyncPlan::Member &member) {
@@ -483,14 +497,19 @@ void SotaUptaneClient::rollbackAppliedSyncMember(const SyncPlan::Member &member)
   secondary_it->second->rollbackPendingInstall();
 }
 
-void SotaUptaneClient::triggerOsRollback() {
+bool SotaUptaneClient::armOsRollback() {
   // The Secondaries are back on their old payload, so the OS has to follow.
   // This used to be owned by the docker-compose Secondary.
   LOG_INFO << "Requesting a bootloader rollback of the OS";
   std::string sink;
-  if (Utils::shell("fw_setenv rollback 1", &sink) != 0) {
-    LOG_ERROR << "Failed to set the bootloader rollback flag";
+  if (Utils::shell(config.bootloader.rollback_command, &sink) != 0) {
+    LOG_ERROR << "Failed to set the bootloader rollback flag; not rebooting";
+    return false;
   }
+  return true;
+}
+
+void SotaUptaneClient::rebootForOsRollback() {
   Bootloader bootloader(config.bootloader, *storage);
   bootloader.reboot();
 }

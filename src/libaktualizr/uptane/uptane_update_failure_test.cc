@@ -172,6 +172,9 @@ struct TestScaffolding {
     // A sync group rollback runs the real Bootloader::reboot(), which would
     // otherwise try to run /sbin/reboot on the machine running the tests.
     conf.bootloader.reboot_command = "/bin/true";
+    // The CI image has no fw_setenv. A failing command must not mark the plan
+    // failed, so the tests use a command that succeeds.
+    conf.bootloader.rollback_command = "/bin/true";
     conf.pacman.fake_need_reboot = test_options.primary_installs_on_reboot;
     conf.pacman.fake_fail_install = test_options.fail_primary_install;
 
