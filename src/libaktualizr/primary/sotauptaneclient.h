@@ -235,6 +235,7 @@ class SotaUptaneClient {
   void rebootForOsRollback();
   void failSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id,
                     data::InstallationResult *final_result = nullptr, std::string *raw_report = nullptr);
+  void copyStoredDeviceInstallationResult(data::InstallationResult *final_result, std::string *raw_report);
   void clearSyncMembersPending(const SyncPlan &plan, const Uptane::CorrelationId &correlation_id);
   void commitSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id,
                       const boost::optional<data::InstallationResult> &primary_finalize,

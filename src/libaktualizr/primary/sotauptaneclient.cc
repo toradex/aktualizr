@@ -475,16 +475,7 @@ void SotaUptaneClient::rollbackSyncMember(SyncPlan &plan, const Uptane::EcuSeria
   plan.markFailed();
   saveSyncPlan(plan);
   clearSyncMembersPending(plan, correlation_id);
-  data::InstallationResult stored_result;
-  std::string stored_raw_report;
-  std::string result_correlation_id;
-  storage->loadDeviceInstallationResult(&stored_result, &stored_raw_report, &result_correlation_id);
-  if (final_result != nullptr) {
-    *final_result = stored_result;
-  }
-  if (raw_report != nullptr) {
-    *raw_report = stored_raw_report;
-  }
+  copyStoredDeviceInstallationResult(final_result, raw_report);
   if (plan.ostreeInGroup()) {
     rebootForOsRollback();
   } else {
@@ -518,16 +509,7 @@ void SotaUptaneClient::abortSyncPlan(SyncPlan &plan, const Uptane::CorrelationId
   }
   clearSyncMembersPending(plan, correlation_id);
   saveSyncPlan(plan);
-  data::InstallationResult stored_result;
-  std::string stored_raw_report;
-  std::string result_correlation_id;
-  storage->loadDeviceInstallationResult(&stored_result, &stored_raw_report, &result_correlation_id);
-  if (final_result != nullptr) {
-    *final_result = stored_result;
-  }
-  if (raw_report != nullptr) {
-    *raw_report = stored_raw_report;
-  }
+  copyStoredDeviceInstallationResult(final_result, raw_report);
   if (plan.ostreeInGroup()) {
     rebootForOsRollback();
   } else {
@@ -571,11 +553,8 @@ void SotaUptaneClient::rebootForOsRollback() {
   bootloader.reboot();
 }
 
-void SotaUptaneClient::failSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id,
-                                   data::InstallationResult *final_result, std::string *raw_report) {
-  plan.markFailed();
-  saveSyncPlan(plan);
-  clearSyncMembersPending(plan, correlation_id);
+void SotaUptaneClient::copyStoredDeviceInstallationResult(data::InstallationResult *final_result,
+                                                          std::string *raw_report) {
   data::InstallationResult stored_result;
   std::string stored_raw_report;
   std::string result_correlation_id;
@@ -586,6 +565,14 @@ void SotaUptaneClient::failSyncPlan(SyncPlan &plan, const Uptane::CorrelationId 
   if (raw_report != nullptr) {
     *raw_report = stored_raw_report;
   }
+}
+
+void SotaUptaneClient::failSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id,
+                                   data::InstallationResult *final_result, std::string *raw_report) {
+  plan.markFailed();
+  saveSyncPlan(plan);
+  clearSyncMembersPending(plan, correlation_id);
+  copyStoredDeviceInstallationResult(final_result, raw_report);
 
   // Nothing of this group is live any more, so let the Secondaries drop the
   // staging they were holding for it.
