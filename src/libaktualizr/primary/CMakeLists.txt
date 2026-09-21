@@ -7,6 +7,7 @@ set(SOURCES aktualizr.cc
             secondary_provider.cc
             sotauptaneclient.cc
             sync_plan.cc
+            sync_supervisor.cc
             update_lock_file.cc)
 
 set(HEADERS aktualizr_helpers.h
@@ -22,6 +23,7 @@ set(HEADERS aktualizr_helpers.h
             secondary_provider_builder.h
             sotauptaneclient.h
             sync_plan.h
+            sync_supervisor.h
             systemd_journal.h
             test_journal.h
             update_lock_file.h)
@@ -161,6 +163,9 @@ add_aktualizr_test(NAME update_lock_file
 
 add_aktualizr_test(NAME sync_plan
                    SOURCES sync_plan_test.cc)
+
+add_aktualizr_test(NAME sync_supervisor
+                   SOURCES sync_supervisor_test.cc)
 
 add_aktualizr_test(NAME aktualizr_update_lock
                    SOURCES aktualizr_update_lock_test.cc
