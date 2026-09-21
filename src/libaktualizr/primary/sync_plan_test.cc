@@ -57,6 +57,36 @@ TEST(SyncPlan, JsonRoundTrip) {
   EXPECT_EQ(loaded.members().at(1).phase, SyncPlan::Phase::kInstalled);
 }
 
+TEST(SyncPlan, FromJsonRejectsOneMemberPlan) {
+  Json::Value json;
+  json["correlation_id"] = "corr-1";
+  json["outcome"] = 0;
+  json["manifest_sent"] = false;
+  Json::Value members(Json::arrayValue);
+  Json::Value member;
+  member["serial"] = "os";
+  member["hardware_id"] = "hw-os";
+  member["phase"] = 0;
+  member["install_called"] = false;
+  members.append(member);
+  json["members"] = members;
+  EXPECT_THROW(SyncPlan::fromJson(json), std::runtime_error);
+}
+
+TEST(SyncPlan, FromJsonRejectsOutOfRangePhase) {
+  Json::Value json = makePlan().toJson();
+  json["members"][0]["phase"] = 99;
+  EXPECT_THROW(SyncPlan::fromJson(json), std::runtime_error);
+}
+
+TEST(SyncPlan, NoteInstallSucceededRejectsTerminalPlan) {
+  SyncPlan plan = makePlan();
+  plan.noteInstallStarted("compose");
+  plan.noteInstallSucceeded("compose");
+  plan.markFailed();
+  EXPECT_THROW(plan.noteInstallSucceeded("compose"), std::runtime_error);
+}
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   logger_init();

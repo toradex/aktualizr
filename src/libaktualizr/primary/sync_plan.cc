@@ -47,6 +47,9 @@ void SyncPlan::noteInstallStarted(const std::string& serial) {
 }
 
 void SyncPlan::noteInstallSucceeded(const std::string& serial) {
+  if (isTerminal()) {
+    throw std::runtime_error("cannot succeed install on terminal sync plan");
+  }
   Member* member = findMember(serial);
   if (member == nullptr) {
     throw std::runtime_error("unknown sync plan member");
@@ -131,18 +134,68 @@ Json::Value SyncPlan::toJson() const {
   return json;
 }
 
+namespace {
+
+bool isValidPhase(int phase) { return phase >= 0 && phase <= static_cast<int>(SyncPlan::Phase::kInstalled); }
+
+bool isValidOutcome(int outcome) {
+  return outcome >= 0 && outcome <= static_cast<int>(SyncPlan::Outcome::kCommitted);
+}
+
+}  // namespace
+
 SyncPlan SyncPlan::fromJson(const Json::Value& json) {
+  if (!json.isObject()) {
+    throw std::runtime_error("invalid sync plan json");
+  }
+  if (!json.isMember("correlation_id") || !json["correlation_id"].isString()) {
+    throw std::runtime_error("missing correlation_id");
+  }
+  if (!json.isMember("outcome") || !json["outcome"].isInt()) {
+    throw std::runtime_error("missing outcome");
+  }
+  if (!json.isMember("manifest_sent") || !json["manifest_sent"].isBool()) {
+    throw std::runtime_error("missing manifest_sent");
+  }
+  if (!json.isMember("members") || !json["members"].isArray()) {
+    throw std::runtime_error("missing members");
+  }
+  const int outcome_int = json["outcome"].asInt();
+  if (!isValidOutcome(outcome_int)) {
+    throw std::runtime_error("invalid outcome");
+  }
+
   std::vector<Member> members;
   for (const auto& member_json : json["members"]) {
+    if (!member_json.isObject()) {
+      throw std::runtime_error("invalid member");
+    }
+    if (!member_json.isMember("serial") || !member_json["serial"].isString()) {
+      throw std::runtime_error("missing member serial");
+    }
+    if (!member_json.isMember("hardware_id") || !member_json["hardware_id"].isString()) {
+      throw std::runtime_error("missing member hardware_id");
+    }
+    if (!member_json.isMember("phase") || !member_json["phase"].isInt()) {
+      throw std::runtime_error("missing member phase");
+    }
+    if (!member_json.isMember("install_called") || !member_json["install_called"].isBool()) {
+      throw std::runtime_error("missing member install_called");
+    }
+    const int phase_int = member_json["phase"].asInt();
+    if (!isValidPhase(phase_int)) {
+      throw std::runtime_error("invalid phase");
+    }
     Member member;
     member.serial = member_json["serial"].asString();
     member.hardware_id = member_json["hardware_id"].asString();
-    member.phase = static_cast<Phase>(member_json["phase"].asInt());
+    member.phase = static_cast<Phase>(phase_int);
     member.install_called = member_json["install_called"].asBool();
     members.push_back(std::move(member));
   }
-  SyncPlan plan(json["correlation_id"].asString(), std::move(members));
-  plan.outcome_ = static_cast<Outcome>(json["outcome"].asInt());
+
+  SyncPlan plan = Create(json["correlation_id"].asString(), std::move(members));
+  plan.outcome_ = static_cast<Outcome>(outcome_int);
   plan.manifest_sent_ = json["manifest_sent"].asBool();
   return plan;
 }
