@@ -27,6 +27,8 @@
 #include "primary/consent.h"
 #include "primary/offline_logs_manager.h"
 #include "primary/online_logs_uploader.h"
+#include "primary/sync_plan.h"
+#include "primary/sync_supervisor.h"
 #include "provisioner.h"
 #include "reportqueue.h"
 #include "uptane/directorrepository.h"
@@ -207,6 +209,23 @@ class SotaUptaneClient {
   Uptane::LazyTargetsList allTargets() const;
   void startupCleanSecondaries();
   void checkAndUpdatePendingSecondaries();
+
+  // Sync groups. Phase 1 only recognises the Torizon auto group: a single
+  // Primary install plus a single docker-compose Secondary are applied
+  // atomically even though the Director metadata does not describe a group.
+  bool isDockerComposeSecondary(const Uptane::EcuSerial &serial) const;
+  bool stageSyncGroup(const Uptane::EcuSerial &primary_ecu_serial, const Uptane::EcuSerial &secondary_ecu_serial,
+                      const Uptane::Target &secondary_target, const Uptane::CorrelationId &correlation_id);
+  boost::optional<SyncPlan> loadSyncPlan() const;
+  void saveSyncPlan(const SyncPlan &plan);
+  void runSyncPlan(SyncPlan &plan, BootObservation boot, const Uptane::CorrelationId &correlation_id);
+  bool applySyncMember(SyncPlan &plan, const Uptane::EcuSerial &serial);
+  void rollbackSyncMember(SyncPlan &plan, const Uptane::EcuSerial &serial, const Uptane::CorrelationId &correlation_id);
+  void failSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id);
+  void clearSyncMembersPending(const SyncPlan &plan, const Uptane::CorrelationId &correlation_id);
+  void commitSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id);
+  bool sendSyncPlanManifest(SyncPlan &plan);
+
   Uptane::EcuSerial primaryEcuSerial() { return provisioner_.PrimaryEcuSerial(); }
   boost::optional<Uptane::HardwareIdentifier> getEcuHwId(const Uptane::EcuSerial &serial);
   bool needTargetFileOnPrimary(const Uptane::Target &target);

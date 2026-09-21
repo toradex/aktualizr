@@ -48,7 +48,7 @@ class FailingSecondary : public SecondaryInterface {
   void init(std::shared_ptr<SecondaryProvider> secondary_provider_in) override {
     secondary_provider = std::move(secondary_provider_in);
   }
-  std::string Type() const override { return "mock"; }
+  std::string Type() const override { return "docker-compose"; }
   PublicKey getPublicKey() const override { return public_key; }
 
   Uptane::HardwareIdentifier getHwId() const override { return Uptane::HardwareIdentifier(sconfig.ecu_hardware_id); }
@@ -101,11 +101,6 @@ class FailingSecondary : public SecondaryInterface {
   }
   data::InstallationResult install(const Uptane::Target &target, const InstallInfo & /*info*/,
                                    const api::FlowControlToken * /*flow_control*/) override {
-    was_sync_update = secondary_provider->pendingPrimaryUpdate();
-    if (was_sync_update) {
-      // For a synchronous update, most of this step happens on reboot.
-      return {data::ResultCode::Numeric::kNeedCompletion, ""};
-    }
     install_calls++;
     return installCommon(target);
   }
@@ -150,7 +145,6 @@ class FailingSecondary : public SecondaryInterface {
   int nothing_pending_calls{0};
   // This result is used for both install and completePendingInstall
   data::ResultCode::Numeric install_result{data::ResultCode::Numeric::kOk};
-  bool was_sync_update{false};
   Uptane::InstalledImageInfo firmware_info;
   // Simulate a user abort during sendFirmware
   bool abort_during_send_firmware{false};
@@ -249,9 +243,8 @@ TEST(UptaneUpdateFailure, SynchronousSecondaryUpdatesSuccess) {
   EXPECT_FALSE(install_result.dev_report.isSuccess());
   EXPECT_EQ(install_result.dev_report.result_code, data::ResultCode::Numeric::kNeedCompletion);
   EXPECT_EQ(s.secondary->send_firmware_calls, 1);
-  EXPECT_EQ(s.secondary->install_calls, 0) << "Secondary will have reported kNeedCompletion";
+  EXPECT_EQ(s.secondary->install_calls, 0) << "The sync plan applies the Secondary after the reboot";
   EXPECT_EQ(s.secondary->complete_pending_install_calls, 0);
-  EXPECT_TRUE(s.secondary->was_sync_update);
   EXPECT_EQ(s.events["AllInstallsComplete"], 1);
 
   // Simulate a reboot
@@ -261,8 +254,8 @@ TEST(UptaneUpdateFailure, SynchronousSecondaryUpdatesSuccess) {
   EXPECT_EQ(s.secondary->nothing_pending_calls, 1) << "Shouldn't be called when there is a pending update";
 
   EXPECT_EQ(s.secondary->send_firmware_calls, 1);
-  EXPECT_EQ(s.secondary->install_calls, 0);
-  EXPECT_EQ(s.secondary->complete_pending_install_calls, 1);
+  EXPECT_EQ(s.secondary->install_calls, 1) << "The apply happens on the boot into the new OS";
+  EXPECT_EQ(s.secondary->complete_pending_install_calls, 0);
   EXPECT_EQ(s.events["AllInstallsComplete"], 1);
 }
 
@@ -312,9 +305,10 @@ TEST(UptaneUpdateFailure, SynchronousSecondaryUpdatesFailure) {
   s.Reboot();
   EXPECT_NO_THROW(s.dut->initialize());
 
-  EXPECT_EQ(s.secondary->install_calls, 0);
+  EXPECT_EQ(s.secondary->install_calls, 1) << "The sync plan applies the Secondary after the reboot";
   EXPECT_EQ(s.secondary->send_firmware_calls, 1);
-  EXPECT_EQ(s.secondary->complete_pending_install_calls, 1);
+  EXPECT_EQ(s.secondary->complete_pending_install_calls, 0);
+  EXPECT_EQ(s.secondary->rollback_pending_install_calls, 1) << "The failed apply is rolled back";
 
   // Case 3: Happy path
   s.secondary->send_firmware_result = data::ResultCode::Numeric::kOk;
@@ -329,7 +323,6 @@ TEST(UptaneUpdateFailure, SynchronousSecondaryUpdatesFailure) {
   s.expected_install_report = data::ResultCode::Numeric::kOk;
   install_result = s.dut->uptaneInstall(download_result.updates);
   EXPECT_TRUE(install_result.dev_report.isSuccess());
-  EXPECT_FALSE(s.secondary->was_sync_update);  // The primary update installed already, we don't try and roll them back
   EXPECT_EQ(install_result.dev_report.result_code, data::ResultCode::Numeric::kOk);
   EXPECT_EQ(s.secondary->install_calls, 1);
   EXPECT_EQ(s.secondary->send_firmware_calls, 1);
@@ -374,9 +367,8 @@ TEST(UptaneUpdateFailure, SuccessNoReboot) {
   result::Install const install_result = s.dut->uptaneInstall(download_result.updates);
 
   EXPECT_TRUE(install_result.dev_report.isSuccess());
-  EXPECT_FALSE(s.secondary->was_sync_update);
   EXPECT_EQ(install_result.dev_report.result_code, data::ResultCode::Numeric::kOk);
-  EXPECT_EQ(s.secondary->install_calls, 1);
+  EXPECT_EQ(s.secondary->install_calls, 1) << "Without a reboot the Secondary applies in the same call";
   EXPECT_EQ(s.secondary->send_firmware_calls, 1);
 }
 
@@ -398,7 +390,6 @@ TEST(UptaneUpdateFailure, PrimaryInstallFailureNoReboot) {
   result::Install const install_result = s.dut->uptaneInstall(download_result.updates);
 
   EXPECT_FALSE(install_result.dev_report.isSuccess());
-  EXPECT_FALSE(s.secondary->was_sync_update);
   EXPECT_EQ(install_result.dev_report.result_code,
             data::ResultCode(data::ResultCode::Numeric::kInstallFailed, "primary_hw:INSTALL_FAILED"));
   EXPECT_EQ(s.secondary->send_firmware_calls, 1);
@@ -444,6 +435,8 @@ TEST(UptaneUpdateFailure, PrimaryInstallFailureNoReboot) {
 
 /**
  * The primary needs a reboot to install, and on the reboot the installation fails.
+ * The Secondary is part of the sync group, so it is never applied and is
+ * reported as failed along with the primary.
  */
 TEST(UptaneUpdateFailure, PrimaryInstallFailure) {
   TestOptions test_options;
@@ -495,16 +488,16 @@ TEST(UptaneUpdateFailure, PrimaryInstallFailure) {
           "ecu" : "secondary_ecu_serial",
           "result" :
           {
-            "code" : "OK",
-            "description" : "",
-            "success" : true
+            "code" : "INSTALL_FAILED",
+            "description" : "The synchronous update this ECU belonged to failed",
+            "success" : false
           }
         }
       ],
       "raw_report" : "Installation failed on one or more ECUs",
       "result" :
       {
-        "code" : "primary_hw:INSTALL_FAILED",
+        "code" : "primary_hw:INSTALL_FAILED|secondary_hw:INSTALL_FAILED",
         "description" : "Installation failed on one or more ECUs",
         "success" : false
       }
