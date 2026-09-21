@@ -64,6 +64,29 @@ TEST(SyncSupervisor, RetryManifestAfterFailedPlan) {
   EXPECT_EQ(step.action, SupervisorAction::kRetryManifest);
 }
 
+TEST(SyncSupervisor, RetryManifestAfterFailedPlanOnRollback) {
+  SyncPlan plan = makePlan();
+  plan.markFailed();
+  const SupervisorStep step = NextStep(plan, true, BootObservation::kRolledBack);
+  EXPECT_EQ(step.action, SupervisorAction::kRetryManifest);
+}
+
+TEST(SyncSupervisor, RetryManifestAfterCommittedPlan) {
+  SyncPlan plan = makePlanWithOsInstalled();
+  plan.noteInstallStarted("compose");
+  plan.noteInstallSucceeded("compose");
+  plan.markCommitted();
+  const SupervisorStep step = NextStep(plan, true, BootObservation::kNewOsBooted);
+  EXPECT_EQ(step.action, SupervisorAction::kRetryManifest);
+}
+
+TEST(SyncSupervisor, ThrowsWhenManifestAlreadySent) {
+  SyncPlan plan = makePlan();
+  plan.markFailed();
+  plan.noteManifestSent();
+  EXPECT_THROW(NextStep(plan, true, BootObservation::kNewOsBooted), std::logic_error);
+}
+
 TEST(SyncSupervisor, RequiresOstreeInGroup) {
   SyncPlan plan = makePlan();
   EXPECT_THROW(NextStep(plan, false, BootObservation::kRebootNotDetected), std::logic_error);
