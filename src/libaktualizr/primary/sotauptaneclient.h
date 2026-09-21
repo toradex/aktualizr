@@ -221,6 +221,9 @@ class SotaUptaneClient {
   void runSyncPlan(SyncPlan &plan, BootObservation boot, const Uptane::CorrelationId &correlation_id);
   bool applySyncMember(SyncPlan &plan, const Uptane::EcuSerial &serial);
   void rollbackSyncMember(SyncPlan &plan, const Uptane::EcuSerial &serial, const Uptane::CorrelationId &correlation_id);
+  void rollbackAppliedSyncMember(const SyncPlan::Member &member);
+  void abortSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id);
+  void triggerOsRollback();
   void failSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id);
   void clearSyncMembersPending(const SyncPlan &plan, const Uptane::CorrelationId &correlation_id);
   void commitSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id);

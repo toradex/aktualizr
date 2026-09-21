@@ -215,6 +215,16 @@ void SotaUptaneClient::finalizeAfterReboot() {
   checkAndUpdatePendingSecondaries();
 
   if (!pending_target) {
+    // A sync plan outlives the Primary promotion: if power was lost between
+    // the OS finalize and the Secondary apply, nothing is pending on the
+    // Primary any more but the group is still half done. The new OS is
+    // already current, so the plan resumes from there.
+    boost::optional<SyncPlan> resumed_plan = loadSyncPlan();
+    if (resumed_plan && resumed_plan->outcome() == SyncPlan::Outcome::kInProgress) {
+      LOG_INFO << "Resuming a sync plan that was left in progress on the current OS";
+      runSyncPlan(*resumed_plan, BootObservation::kNewOsBooted, resumed_plan->correlationId());
+      return;
+    }
     LOG_ERROR << "No pending update for Primary ECU found, continuing with initialization";
     online_logs_uploader_.End();
     return;
@@ -338,7 +348,9 @@ void SotaUptaneClient::runSyncPlan(SyncPlan &plan, BootObservation boot, const U
         return;
       case SupervisorAction::kApplyNextInstall:
         if (!applySyncMember(plan, Uptane::EcuSerial(step.serial))) {
-          failSyncPlan(plan, correlation_id);
+          // The new OS is live but the group can never complete, so it has to
+          // go back rather than report a success the device does not have.
+          abortSyncPlan(plan, correlation_id);
           return;
         }
         break;
@@ -383,6 +395,13 @@ bool SotaUptaneClient::applySyncMember(SyncPlan &plan, const Uptane::EcuSerial &
   } catch (const std::exception &ex) {
     install_res = data::InstallationResult(data::ResultCode::Numeric::kInternalError, ex.what());
   }
+  if (install_res.result_code == data::ResultCode::Numeric::kNeedCompletion) {
+    // Waiting for a later complete-install would leave the group stuck, and
+    // recording need-completion would tell the server the device is still
+    // mid-install. Treat it as the failure it is.
+    install_res = data::InstallationResult(data::ResultCode::Numeric::kInstallFailed,
+                                           "A sync group install must not return need-completion");
+  }
   storage->saveEcuInstallationResult(serial, install_res);
 
   if (install_res.isSuccess()) {
@@ -396,16 +415,52 @@ bool SotaUptaneClient::applySyncMember(SyncPlan &plan, const Uptane::EcuSerial &
 
 void SotaUptaneClient::rollbackSyncMember(SyncPlan &plan, const Uptane::EcuSerial &serial,
                                           const Uptane::CorrelationId &correlation_id) {
-  const auto secondary_it = secondaries.find(serial);
-  if (secondary_it != secondaries.end()) {
-    LOG_INFO << "Rolling back the sync group install on ECU " << serial;
-    secondary_it->second->rollbackPendingInstall();
+  const auto &members = plan.members();
+  const auto member_it =
+      std::find_if(members.cbegin(), members.cend(),
+                   [&serial](const SyncPlan::Member &m) { return m.serial == serial.ToString(); });
+  if (member_it != members.cend()) {
+    rollbackAppliedSyncMember(*member_it);
   }
 
   plan.markFailed();
   saveSyncPlan(plan);
   clearSyncMembersPending(plan, correlation_id);
 
+  triggerOsRollback();
+}
+
+void SotaUptaneClient::abortSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id) {
+  const auto &members = plan.members();
+  for (auto it = members.crbegin(); it != members.crend(); ++it) {
+    rollbackAppliedSyncMember(*it);
+  }
+
+  plan.markFailed();
+  // The OS is going back, so the Primary belongs to this failure as well.
+  storage->saveEcuInstallationResult(
+      primaryEcuSerial(), data::InstallationResult(data::ResultCode::Numeric::kInstallFailed,
+                                                   "The synchronous update this ECU belonged to failed"));
+  clearSyncMembersPending(plan, correlation_id);
+  saveSyncPlan(plan);
+
+  triggerOsRollback();
+}
+
+void SotaUptaneClient::rollbackAppliedSyncMember(const SyncPlan::Member &member) {
+  // rollback undoes an install that ran; it is not a way to discard staging.
+  if (!member.install_called || member.serial == primaryEcuSerial().ToString()) {
+    return;
+  }
+  const auto secondary_it = secondaries.find(Uptane::EcuSerial(member.serial));
+  if (secondary_it == secondaries.end()) {
+    return;
+  }
+  LOG_INFO << "Rolling back the sync group install on ECU " << member.serial;
+  secondary_it->second->rollbackPendingInstall();
+}
+
+void SotaUptaneClient::triggerOsRollback() {
   // The Secondaries are back on their old payload, so the OS has to follow.
   // This used to be owned by the docker-compose Secondary.
   LOG_INFO << "Requesting a bootloader rollback of the OS";

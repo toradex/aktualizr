@@ -169,6 +169,9 @@ struct TestScaffolding {
     conf.uptane.force_install_completion = true;
     conf.pacman.images_path = temp_dir.Path() / "images";
     conf.bootloader.reboot_sentinel_dir = temp_dir.Path();
+    // A sync group rollback runs the real Bootloader::reboot(), which would
+    // otherwise try to run /sbin/reboot on the machine running the tests.
+    conf.bootloader.reboot_command = "/bin/true";
     conf.pacman.fake_need_reboot = test_options.primary_installs_on_reboot;
     conf.pacman.fake_fail_install = test_options.fail_primary_install;
 
@@ -257,6 +260,43 @@ TEST(UptaneUpdateFailure, SynchronousSecondaryUpdatesSuccess) {
   EXPECT_EQ(s.secondary->install_calls, 1) << "The apply happens on the boot into the new OS";
   EXPECT_EQ(s.secondary->complete_pending_install_calls, 0);
   EXPECT_EQ(s.events["AllInstallsComplete"], 1);
+}
+
+/**
+ * Power is lost after the OS finalize promoted the Primary but before the
+ * Secondary was applied. Nothing is pending on the Primary on the next boot,
+ * so the sync plan itself has to carry the group to a terminal state.
+ */
+TEST(UptaneUpdateFailure, SynchronousSecondaryUpdatesResumeAfterPrimaryPromotion) {
+  TestScaffolding s;  // NOLINT
+
+  EXPECT_NO_THROW(s.dut->initialize());
+  result::UpdateCheck const update_result = s.dut->fetchMeta();
+  result::Download const download_result = s.dut->downloadImages(update_result.updates);
+  EXPECT_EQ(download_result.status, result::DownloadStatus::kSuccess);
+
+  s.expected_install_report = data::ResultCode::Numeric::kNeedCompletion;
+  result::Install const install_result = s.dut->uptaneInstall(download_result.updates);
+  EXPECT_EQ(install_result.dev_report.result_code, data::ResultCode::Numeric::kNeedCompletion);
+  EXPECT_EQ(s.secondary->install_calls, 0);
+
+  // Promote the Primary the way finalizeAfterReboot() would have, then lose
+  // power before the Secondary apply.
+  boost::optional<Uptane::Target> pending_primary;
+  Uptane::CorrelationId correlation_id;
+  s.storage->loadInstalledVersions(s.conf.provision.primary_ecu_serial, nullptr, &pending_primary, &correlation_id);
+  ASSERT_TRUE(!!pending_primary);
+  s.storage->saveInstalledVersion(s.conf.provision.primary_ecu_serial, *pending_primary,
+                                  InstalledVersionUpdateMode::kCurrent, correlation_id);
+
+  s.Reboot();
+  s.expected_install_report = data::ResultCode::Numeric::kOk;
+  EXPECT_NO_THROW(s.dut->initialize());
+
+  EXPECT_EQ(s.secondary->install_calls, 1) << "The plan must still apply the Secondary";
+  EXPECT_EQ(s.secondary->complete_pending_install_calls, 0);
+  EXPECT_EQ(s.secondary->rollback_pending_install_calls, 0);
+  EXPECT_FALSE(s.dut->hasPendingUpdates()) << "The group must reach a terminal state";
 }
 
 /**
