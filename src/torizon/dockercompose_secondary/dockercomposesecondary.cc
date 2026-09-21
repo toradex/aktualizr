@@ -130,11 +130,8 @@ data::InstallationResult DockerComposeSecondary::install(const Uptane::Target& t
   (void)flow_control;
   LOG_INFO << "Updating containers via docker-compose";
 
-  bool const sync_update = secondary_provider_->pendingPrimaryUpdate();
-  if (sync_update) {
-    // For a synchronous update, most of this step happens on reboot.
-    LOG_INFO << "OSTree update pending. This is a synchronous update transaction.";
-    return {data::ResultCode::Numeric::kNeedCompletion, ""};
+  if (!boost::filesystem::exists(composeFileNew())) {
+    return {data::ResultCode::Numeric::kInstallFailed, "missing staged compose file"};
   }
 
   if (boost::filesystem::exists(composeFile())) {
@@ -225,53 +222,12 @@ boost::optional<data::InstallationResult> DockerComposeSecondary::completePendin
 
 void DockerComposeSecondary::rollbackPendingInstall() {
   LOG_INFO << "Rolling back container update";
-  // This function handles a failed sync update and
-  // performs a rollback on the needed ECUs to ensure sync.
 
-  if (compose_manager_.checkRollback()) {
-    // We are being asked to complete a pending synchronous install. However
-    // the OS has triggered a rollback. The following things just happened:
-    // 1) User requested a synchronous install of OSTree base OS + docker
-    //    compose secondary.
-    // 2) The OSTree update was installed, and Aktualizr intended to update
-    //    the docker compose secondary after a reboot
-    // 3) The device rebooted
-    // 4) The new OS version was broken and didn't boot. U-Boot triggered a
-    //    rollback because the bootcount was exceeded
-    // 5) We're now booted in the previous OS version.
-    // 6) DockerComposeSecondary::completePendingInstall() detected the
-    //    rollback and failed the install without making any docker changes
-    // 7) sotauptaneclient noted the installation failure and called us to tidy
-    //    things up.
-
-    // systemd didn't start either image. Start the old image manually, and
-    // delete composeFileNew() so systemd will start docker-compose
-    // automatically next time.
+  if (boost::filesystem::exists(composeFile())) {
     compose_manager_.up(composeFile());
-    compose_manager_.cleanup();
-    boost::filesystem::remove(composeFileNew());
-  } else {
-    // In this case (following on from above):
-    // 4) The device rebooted into the new OS successfully
-    // 5) DockerComposeSecondary::completePendingInstall() was called to perform the install
-    // 6) docker-compose up failed
-
-    // We need to:
-    //  a) Revert to the old OS image
-    //  b) Start the old docker-compose image
-    //  c) Prune the images that were downloaded
-    //  d) Remove composeFileNew() so systemd starts the old image in the future
-    // Perform step a) now. On reboot the following will happen:
-    //  7) OSTree will boot the old image
-    //  8) systemd will see composeFileNew() and won't start either image
-    //  9) Aktualizr will see that there is no pending installs (it already failed) and calls
-    // 10) DockerComposeSecondary::cleanStartup(), which sees composeFileNew(), and performs steps b,c and d.
-    // Note step b/c must be after a, because the old docker image may only be
-    // compatible with the old OS image. If they ran on the new OS, then a
-    // synchronous update would have been unnecessary.
-    CommandRunner::run("fw_setenv rollback 1");
-    CommandRunner::run("reboot");
   }
+  compose_manager_.cleanup();
+  boost::filesystem::remove(composeFileNew());
 }
 
 void DockerComposeSecondary::cleanStartup() {
