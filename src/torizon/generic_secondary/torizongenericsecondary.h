@@ -36,11 +36,14 @@ class TorizonGenericSecondary : public ManagedSecondary {
 
   // Main methods being overridden from `ManagedSecondary`.
   bool getFirmwareInfo(Uptane::InstalledImageInfo& firmware_info) const override;
+  data::InstallationResult sendFirmware(const Uptane::Target& target, const InstallInfo& install_info,
+                                        const api::FlowControlToken* flow_control) override;
   data::InstallationResult install(const Uptane::Target& target, const InstallInfo& info,
                                    const api::FlowControlToken* flow_control) override;
   boost::optional<data::InstallationResult> completePendingInstall(const Uptane::Target& target) override {
     return completeInstall(target);
   }
+  void rollbackPendingInstall() override;
 
  protected:
   using VarMap = std::unordered_map<std::string, std::string>;

@@ -284,10 +284,63 @@ data::ResultCode::Numeric TorizonGenericSecondary::resolveHandlerResult(ActionHa
   return result_code;
 }
 
+data::InstallationResult TorizonGenericSecondary::sendFirmware(const Uptane::Target& target,
+                                                               const InstallInfo& install_info,
+                                                               const api::FlowControlToken* flow_control) {
+  if (flow_control != nullptr && flow_control->hasAborted()) {
+    return data::InstallationResult(data::ResultCode::Numeric::kOperationCancelled, "");
+  }
+
+  if (!target.syncGroupId()) {
+    return data::InstallationResult(data::ResultCode::Numeric::kOk, "");
+  }
+
+  if (config_.handler_downloads_firmware) {
+    const std::string action{"download-firmware"};
+    VarMap vars;
+    getDownloadFirmwareVars(vars, target, install_info);
+
+    Json::Value output;
+    // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
+    const ActionHandlerResult handler_result = callActionHandler(action, vars, &output);
+    const data::ResultCode::Numeric result_code = resolveHandlerResult(handler_result, output, action);
+    return data::InstallationResult(result_code, output["message"].asString());
+  }
+
+  const boost::filesystem::path new_fwpath = getNewFirmwarePath();
+  LOG_TRACE << "Creating " << new_fwpath;
+  auto strm = secondary_provider_->getTargetFileHandle(target);
+  std::ofstream out_file(new_fwpath.string(), std::ios::binary);
+  out_file << strm.rdbuf();
+  strm.close();
+  out_file.close();
+
+  const boost::filesystem::path new_tgtname = getNewTargetNamePath();
+  LOG_TRACE << "Storing target name " << target.filename() << " into " << new_tgtname;
+  Utils::writeFile(new_tgtname, target.filename());
+
+  return data::InstallationResult(data::ResultCode::Numeric::kOk, "");
+}
+
 data::InstallationResult TorizonGenericSecondary::install(const Uptane::Target& target, const InstallInfo& info,
                                                           const api::FlowControlToken* flow_control) {
   if (flow_control != nullptr && flow_control->hasAborted()) {
     return data::InstallationResult(data::ResultCode::Numeric::kOperationCancelled, "");
+  }
+
+  if (target.syncGroupId()) {
+    const std::string action{"install"};
+    VarMap vars;
+    getInstallVars(vars, target, info);
+
+    Json::Value output;
+    // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
+    const ActionHandlerResult handler_result = callActionHandler(action, vars, &output);
+    const data::ResultCode::Numeric result_code = resolveHandlerResult(handler_result, output, action);
+    if (!config_.handler_downloads_firmware) {
+      maybeFinishInstall(result_code, getNewFirmwarePath(), getNewTargetNamePath());
+    }
+    return data::InstallationResult(result_code, output["message"].asString());
   }
 
   if (config_.handler_downloads_firmware) {
@@ -374,6 +427,15 @@ data::InstallationResult TorizonGenericSecondary::completeInstall(const Uptane::
   maybeFinishInstall(result_code, getNewFirmwarePath(), getNewTargetNamePath());
 
   return data::InstallationResult(result_code, output["message"].asString());
+}
+
+void TorizonGenericSecondary::rollbackPendingInstall() {
+  Json::Value output;
+  const ActionHandlerResult handler_result = callActionHandler("rollback", {}, &output);
+  const data::ResultCode::Numeric code = resolveHandlerResult(handler_result, output, "rollback");
+  if (code != data::ResultCode::Numeric::kOk) {
+    LOG_ERROR << "torizon-generic rollback failed";
+  }
 }
 
 const TorizonGenericSecondary::VarMap& TorizonGenericSecondary::getSharedVars(bool update) const {

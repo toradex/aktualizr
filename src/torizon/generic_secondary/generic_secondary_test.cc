@@ -33,6 +33,17 @@ static std::string getSha256Sum(boost::filesystem::path file) {
 
 void touch(boost::filesystem::path fpath) { std::ofstream output(fpath.string()); }
 
+static Uptane::Target makeTarget(bool sync_group) {
+  Json::Value target_json;
+  target_json["hashes"]["sha256"] = "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb";
+  target_json["custom"]["uri"] = "test-uri";
+  if (sync_group) {
+    target_json["custom"]["sync_group_id"] = "group-a";
+  }
+  target_json["length"] = 1;
+  return Uptane::Target("fake_file", target_json);
+}
+
 std::shared_ptr<Primary::TorizonGenericSecondaryConfig> makeTestConfig(const TemporaryDirectory& temp_dir,
                                                                        boost::filesystem::path action_handler_path) {
   auto config = std::make_shared<Primary::TorizonGenericSecondaryConfig>();
@@ -85,7 +96,8 @@ class TorizonGenericSecondaryTest : public ::testing::Test {
   }
 
   void makeSecondaryWithHandlerDownload(boost::filesystem::path handler_rel_path) {
-    auto handler_path = boost::filesystem::current_path() / handler_rel_path;
+    auto handler_path =
+        handler_rel_path.is_absolute() ? handler_rel_path : boost::filesystem::current_path() / handler_rel_path;
     sconfig_ = makeTestConfig(*temp_dir_, handler_path);
     sconfig_->handler_downloads_firmware = true;
     secondary_ = std::make_shared<Primary::TorizonGenericSecondary>(*sconfig_);
@@ -96,6 +108,29 @@ class TorizonGenericSecondaryTest : public ::testing::Test {
     sconfig_ = makeTestConfig(*temp_dir_, std::move(handler_path));
     secondary_ = std::make_shared<Primary::TorizonGenericSecondary>(*sconfig_);
     secondary_->init(secondary_provider_);
+  }
+
+  boost::filesystem::path makeLoggingHandler(bool fail_download = false) {
+    const boost::filesystem::path log_path = temp_dir_->Path() / "actions.log";
+    const boost::filesystem::path handler_path = temp_dir_->Path() / "action_handler.sh";
+    std::ofstream handler(handler_path.string());
+    handler << "#!/bin/bash\n";
+    handler << "echo \"$1\" >> \"" << log_path.string() << "\"\n";
+    if (fail_download) {
+      handler << "if [ \"$1\" = \"download-firmware\" ]; then\n";
+      handler << "  echo '{\"status\":\"failed\",\"message\":\"no image\"}'\n";
+      handler << "  exit 0\n";
+      handler << "fi\n";
+    }
+    handler << "echo '{\"status\":\"ok\"}'\n";
+    handler.close();
+    boost::filesystem::permissions(handler_path, boost::filesystem::all_all);
+    return handler_path;
+  }
+
+  std::string actionLog() const {
+    const boost::filesystem::path log_path = temp_dir_->Path() / "actions.log";
+    return boost::filesystem::exists(log_path) ? Utils::readFile(log_path.string()) : "";
   }
 
   std::shared_ptr<TemporaryDirectory> temp_dir_;
@@ -211,6 +246,79 @@ TEST_F(TorizonGenericSecondaryTest, InstallDownloadFirmwareSuccess) {
 
   EXPECT_EQ(secondary_->install(target, info, nullptr).result_code, data::ResultCode::Numeric::kOk);
   EXPECT_EQ(Utils::readFile(sconfig_->target_name_path.string()), "fake_file");
+}
+
+TEST_F(TorizonGenericSecondaryTest, SyncHandlerDownloadStagesThenInstallApplies) {
+  const auto handler_path = makeLoggingHandler();
+  makeSecondaryWithHandlerDownload(handler_path);
+  const Uptane::Target target = makeTarget(true);
+  const InstallInfo info(UpdateType::kOnline);
+  Utils::writeFile(sconfig_->firmware_path, std::string("old firmware"));
+
+  EXPECT_EQ(secondary_->sendFirmware(target, info, nullptr).result_code, data::ResultCode::Numeric::kOk);
+  EXPECT_EQ(actionLog(), "download-firmware\n");
+  EXPECT_EQ(Utils::readFile(sconfig_->firmware_path.string()), "old firmware");
+
+  EXPECT_EQ(secondary_->install(target, info, nullptr).result_code, data::ResultCode::Numeric::kOk);
+  EXPECT_EQ(actionLog(), "download-firmware\ninstall\n");
+}
+
+TEST_F(TorizonGenericSecondaryTest, SyncHandlerDownloadFailureDoesNotInstall) {
+  const auto handler_path = makeLoggingHandler(true);
+  makeSecondaryWithHandlerDownload(handler_path);
+  const Uptane::Target target = makeTarget(true);
+  const InstallInfo info(UpdateType::kOnline);
+
+  EXPECT_EQ(secondary_->sendFirmware(target, info, nullptr).result_code, data::ResultCode::Numeric::kInstallFailed);
+  EXPECT_EQ(actionLog(), "download-firmware\n");
+}
+
+TEST_F(TorizonGenericSecondaryTest, SyncPrimaryDownloadStagesThenInstallApplies) {
+  const auto handler_path = makeLoggingHandler();
+  makeSecondaryWithHandlerPath(handler_path);
+  const Uptane::Target target = makeTarget(true);
+  const InstallInfo info(UpdateType::kOnline);
+  {
+    auto out = package_manager_->createTargetFile(target);
+    out << "a";
+  }
+
+  EXPECT_EQ(secondary_->sendFirmware(target, info, nullptr).result_code, data::ResultCode::Numeric::kOk);
+  EXPECT_TRUE(boost::filesystem::exists(sconfig_->firmware_path.string() + ".new"));
+  EXPECT_EQ(actionLog(), "");
+
+  EXPECT_EQ(secondary_->install(target, info, nullptr).result_code, data::ResultCode::Numeric::kOk);
+  EXPECT_EQ(actionLog(), "install\n");
+}
+
+TEST_F(TorizonGenericSecondaryTest, NonSyncHandlerDownloadKeepsDownloadInstallAction) {
+  const auto handler_path = makeLoggingHandler();
+  makeSecondaryWithHandlerDownload(handler_path);
+  const Uptane::Target target = makeTarget(false);
+  const InstallInfo info(UpdateType::kOnline);
+
+  EXPECT_EQ(secondary_->install(target, info, nullptr).result_code, data::ResultCode::Numeric::kOk);
+  EXPECT_EQ(actionLog(), "download-install\n");
+}
+
+TEST_F(TorizonGenericSecondaryTest, SyncInstallRollbackInvokesHandlerAndIgnoresFailure) {
+  const auto handler_path = makeLoggingHandler();
+  makeSecondaryWithHandlerDownload(handler_path);
+  const Uptane::Target target = makeTarget(true);
+  const InstallInfo info(UpdateType::kOnline);
+
+  EXPECT_EQ(secondary_->install(target, info, nullptr).result_code, data::ResultCode::Numeric::kOk);
+  EXPECT_NO_THROW(secondary_->rollbackPendingInstall());
+  EXPECT_EQ(actionLog(), "install\nrollback\n");
+
+  const auto failing_handler_path = makeLoggingHandler(true);
+  std::ofstream handler(failing_handler_path.string());
+  handler << "#!/bin/bash\n";
+  handler << "echo \"$1\" >> \"" << (temp_dir_->Path() / "actions.log").string() << "\"\n";
+  handler << "echo '{\"status\":\"failed\"}'\n";
+  handler.close();
+  boost::filesystem::permissions(failing_handler_path, boost::filesystem::all_all);
+  EXPECT_NO_THROW(secondary_->rollbackPendingInstall());
 }
 
 TEST_F(TorizonGenericSecondaryTest, HandlerFinishedBySignal) {
