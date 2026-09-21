@@ -92,6 +92,12 @@ class TorizonGenericSecondaryTest : public ::testing::Test {
     secondary_->init(secondary_provider_);
   }
 
+  void makeSecondaryWithHandlerPath(boost::filesystem::path handler_path) {
+    sconfig_ = makeTestConfig(*temp_dir_, std::move(handler_path));
+    secondary_ = std::make_shared<Primary::TorizonGenericSecondary>(*sconfig_);
+    secondary_->init(secondary_provider_);
+  }
+
   std::shared_ptr<TemporaryDirectory> temp_dir_;
   std::shared_ptr<Primary::TorizonGenericSecondaryConfig> sconfig_;
   std::shared_ptr<Primary::TorizonGenericSecondary> secondary_;
@@ -129,6 +135,57 @@ TEST_F(TorizonGenericSecondaryTest, NonExistingHandler) {
   LOG_DEBUG << "Running a non-existing action handler";
   handler_result = secondary_->callActionHandler("dummy-action", vars);
   EXPECT_EQ(handler_result, TorizonGenericSecondary::ActionHandlerResult::NotAvailable);
+}
+
+TEST_F(TorizonGenericSecondaryTest, SupportsRollbackConfigRoundTrip) {
+  const boost::filesystem::path config_path = temp_dir_->Path() / "secondaries.json";
+
+  auto config = makeTestConfig(*temp_dir_, temp_dir_->Path() / "unused_handler.sh");
+  config->supports_rollback = true;
+  config->dump(config_path);
+
+  const auto loaded = Primary::TorizonGenericSecondaryConfig::create_from_file(config_path);
+  ASSERT_EQ(loaded.size(), 1U);
+  EXPECT_TRUE(loaded[0].supports_rollback);
+}
+
+TEST_F(TorizonGenericSecondaryTest, SupportsRollbackDefaultsFalse) {
+  Json::Value json_config;
+  json_config["partial_verifying"] = false;
+  json_config["ecu_serial"] = "12345678";
+  json_config["ecu_hardware_id"] = "secondary_hardware";
+  json_config["full_client_dir"] = temp_dir_->Path().string();
+  json_config["ecu_private_key"] = "sec.priv";
+  json_config["ecu_public_key"] = "sec.pub";
+  json_config["firmware_path"] = (temp_dir_->Path() / "firmware.bin").string();
+  json_config["target_name_path"] = (temp_dir_->Path() / "firmware_name.txt").string();
+  json_config["metadata_path"] = (temp_dir_->Path() / "metadata").string();
+  json_config["action_handler_path"] = (temp_dir_->Path() / "handler.sh").string();
+
+  Primary::TorizonGenericSecondaryConfig config(json_config);
+  EXPECT_FALSE(config.supports_rollback);
+}
+
+TEST_F(TorizonGenericSecondaryTest, InterfaceMinorExportedToHandler) {
+  const boost::filesystem::path log_path = temp_dir_->Path() / "interface.log";
+  const boost::filesystem::path handler_path = temp_dir_->Path() / "log_interface.sh";
+  {
+    std::ofstream handler(handler_path.string());
+    handler << "#!/bin/bash\n";
+    handler << "echo \"$SECONDARY_INTERFACE_MAJOR\" >> \"" << log_path.string() << "\"\n";
+    handler << "echo \"$SECONDARY_INTERFACE_MINOR\" >> \"" << log_path.string() << "\"\n";
+    handler << "echo '{\"status\":\"ok\"}'\n";
+  }
+  boost::filesystem::permissions(handler_path, boost::filesystem::all_all);
+
+  makeSecondaryWithHandlerPath(handler_path);
+
+  Uptane::InstalledImageInfo firmware_info;
+  EXPECT_TRUE(secondary_->getFirmwareInfo(firmware_info));
+
+  const std::string log_contents = Utils::readFile(log_path.string());
+  EXPECT_NE(log_contents.find("1"), std::string::npos);
+  EXPECT_NE(log_contents.find("2"), std::string::npos);
 }
 
 TEST_F(TorizonGenericSecondaryTest, NeedsImageFileOnPrimaryDefault) {

@@ -21,7 +21,7 @@
 #include "torizongenericsecondary.h"
 
 static constexpr int CURRENT_INTERFACE_MAJOR = 1;
-static constexpr int CURRENT_INTERFACE_MINOR = 1;
+static constexpr int CURRENT_INTERFACE_MINOR = 2;
 
 namespace bp = boost::process;
 namespace bf = boost::filesystem;
@@ -41,6 +41,7 @@ TorizonGenericSecondaryConfig::TorizonGenericSecondaryConfig(const Json::Value& 
   metadata_path = json_config["metadata_path"].asString();
   action_handler_path = json_config["action_handler_path"].asString();
   handler_downloads_firmware = json_config.get("handler_downloads_firmware", false).asBool();
+  supports_rollback = json_config.get("supports_rollback", false).asBool();
 }
 
 std::vector<TorizonGenericSecondaryConfig> TorizonGenericSecondaryConfig::create_from_file(
@@ -73,6 +74,7 @@ void TorizonGenericSecondaryConfig::dump(const boost::filesystem::path& file_ful
   json_config["metadata_path"] = metadata_path.string();
   json_config["action_handler_path"] = action_handler_path.string();
   json_config["handler_downloads_firmware"] = handler_downloads_firmware;
+  json_config["supports_rollback"] = supports_rollback;
 
   Json::Value root;
   // Append to the config file if it already exists.

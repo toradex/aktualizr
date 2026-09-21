@@ -22,6 +22,7 @@ class TorizonGenericSecondaryConfig : public ManagedSecondaryConfig {
 
   boost::filesystem::path action_handler_path;
   bool handler_downloads_firmware{false};
+  bool supports_rollback{false};
 };
 
 class TorizonGenericSecondary : public ManagedSecondary {
