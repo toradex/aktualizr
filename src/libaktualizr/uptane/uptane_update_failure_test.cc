@@ -644,6 +644,25 @@ TEST(UptaneUpdateFailure, ExplicitGroupRejectsGenericWithoutRollback) {
   EXPECT_FALSE(s.storage->loadSyncPlan(&plan));
 }
 
+TEST(UptaneUpdateFailure, ExplicitNoPendingNoOstreePlanFailsClosedOnInitialize) {
+  TestOptions options;
+  options.explicit_secondary = true;
+  options.secondary_supports_rollback = true;
+  TestScaffolding s{options};  // NOLINT
+
+  SyncPlan plan = SyncPlan::Create(
+      "id0",
+      {{"secondary_ecu_serial", "secondary_hw", SyncPlan::Phase::kStaged, false},
+       {"generic_ecu_serial", "generic_hw", SyncPlan::Phase::kStaged, false}},
+      false);
+  s.storage->saveSyncPlan(Utils::jsonToCanonicalStr(plan.toJson()));
+
+  EXPECT_NO_THROW(s.dut->initialize());
+
+  std::string stored_plan;
+  EXPECT_FALSE(s.storage->loadSyncPlan(&stored_plan));
+}
+
 TEST(UptaneUpdateFailure, ExplicitGroupInstallsRollbackCapableGenericSameBoot) {
   TestOptions options;
   options.primary_installs_on_reboot = false;

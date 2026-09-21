@@ -166,12 +166,15 @@ data::InstallationResult SotaUptaneClient::PackageInstall(const Uptane::Target &
 
 void SotaUptaneClient::finalizeAfterReboot() {
   if (!hasPendingUpdates()) {
-    // A sync plan that already reached a terminal state may still owe the
-    // server its manifest, for example after the rollback reboot.
-    boost::optional<SyncPlan> finished_plan = loadSyncPlan();
-    if (finished_plan && finished_plan->manifestPending()) {
+    boost::optional<SyncPlan> plan = loadSyncPlan();
+    if (plan && plan->outcome() == SyncPlan::Outcome::kInProgress && !plan->ostreeInGroup()) {
+      LOG_INFO << "Resuming an in-progress no-OSTree sync plan with no pending versions";
+      runSyncPlan(*plan, BootObservation::kNewOsBooted, plan->correlationId(), boost::none);
+    } else if (plan && plan->manifestPending()) {
+      // A sync plan that already reached a terminal state may still owe the
+      // server its manifest, for example after the rollback reboot.
       LOG_INFO << "Sending the outstanding manifest for a finished sync plan";
-      sendSyncPlanManifest(*finished_plan);
+      sendSyncPlanManifest(*plan);
     }
     LOG_DEBUG << "No pending updates, continuing with initialization";
     return;
