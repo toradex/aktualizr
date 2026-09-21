@@ -6,6 +6,7 @@ set(SOURCES aktualizr.cc
             secondary_install_job.cc
             secondary_provider.cc
             sotauptaneclient.cc
+            sync_plan.cc
             update_lock_file.cc)
 
 set(HEADERS aktualizr_helpers.h
@@ -20,6 +21,7 @@ set(HEADERS aktualizr_helpers.h
             secondary_install_job.h
             secondary_provider_builder.h
             sotauptaneclient.h
+            sync_plan.h
             systemd_journal.h
             test_journal.h
             update_lock_file.h)
@@ -156,6 +158,9 @@ add_aktualizr_test(NAME director_offline
 
 add_aktualizr_test(NAME update_lock_file
                    SOURCES update_lock_file_test.cc)
+
+add_aktualizr_test(NAME sync_plan
+                   SOURCES sync_plan_test.cc)
 
 add_aktualizr_test(NAME aktualizr_update_lock
                    SOURCES aktualizr_update_lock_test.cc
