@@ -302,8 +302,9 @@ boost::optional<SyncPlan> SotaUptaneClient::loadSyncPlan() const {
   try {
     return SyncPlan::fromJson(Utils::parseJSON(json));
   } catch (const std::exception &ex) {
-    LOG_ERROR << "Discarding an unreadable sync plan: " << ex.what();
-    storage->clearSyncPlan();
+    // Keep the row. Clearing it would let a later install pretend the group
+    // never existed.
+    LOG_ERROR << "Sync plan is stored but cannot be read: " << ex.what();
     return boost::none;
   }
 }
@@ -320,6 +321,12 @@ bool SotaUptaneClient::stageSyncGroup(const Uptane::EcuSerial &primary_ecu_seria
   const boost::optional<Uptane::HardwareIdentifier> secondary_hw_id = getEcuHwId(secondary_ecu_serial);
   if (!primary_hw_id || !secondary_hw_id) {
     LOG_ERROR << "Cannot stage a sync group without hardware IDs for both ECUs";
+    return false;
+  }
+
+  std::string existing_plan;
+  if (storage->loadSyncPlan(&existing_plan)) {
+    LOG_ERROR << "Refusing to replace a sync plan that has not been cleared";
     return false;
   }
 
@@ -1430,6 +1437,12 @@ result::UpdateCheck SotaUptaneClient::fetchMeta(bool peek, const std::string &ex
     return {{}, 0, result::UpdateStatus::kError, "There are pending updates, no new updates are checked"};
   }
 
+  std::string existing_plan;
+  if (storage->loadSyncPlan(&existing_plan)) {
+    LOG_INFO << "A sync plan is still stored. Skipping check for a new update.";
+    return {{}, 0, result::UpdateStatus::kError, "A sync plan is still stored"};
+  }
+
   // Uptane step 1 (build the vehicle version manifest)
   // Skip on commit confirmation (expected_correlation_id set): the preceding
   // peek already uploaded the manifest, and regenerating it is potentially
@@ -1590,6 +1603,14 @@ result::UpdateStatus SotaUptaneClient::checkUpdatesOffline(const std::vector<Upt
 result::Install SotaUptaneClient::uptaneInstall(const std::vector<Uptane::Target> &updates, UpdateType utype) {
   if (utype != UpdateType::kOffline) {
     requiresAlreadyProvisioned();
+  }
+
+  std::string existing_plan;
+  if (storage->loadSyncPlan(&existing_plan)) {
+    LOG_ERROR << "Refusing a new installation while a sync plan is still stored";
+    result::Install refused;
+    refused.dev_report = {false, data::ResultCode::Numeric::kInternalError, "A sync plan is already stored"};
+    return refused;
   }
 
   auto correlation_id = director_repo.getCorrelationId();
@@ -2172,18 +2193,24 @@ void SotaUptaneClient::checkAndUpdatePendingSecondaries() {
   std::vector<std::pair<Uptane::EcuSerial, Hash>> pending_ecus;
   storage->getPendingEcus(&pending_ecus);
 
-  // ECUs in a live sync plan are driven by the supervisor, not by
-  // completePendingInstall().
+  // Any stored sync plan owns its ECUs until the row is cleared, including a
+  // failed plan whose pending flags have not been cleared yet.
+  std::string raw_plan;
+  const bool plan_recorded = storage->loadSyncPlan(&raw_plan);
   const boost::optional<SyncPlan> plan = loadSyncPlan();
-  const bool plan_in_progress = plan && plan->outcome() == SyncPlan::Outcome::kInProgress;
+  if (plan_recorded && !plan) {
+    LOG_ERROR << "A sync plan is stored but cannot be read; leaving pending secondaries untouched";
+    return;
+  }
 
   for (const auto &pending_ecu : pending_ecus) {
     if (primaryEcuSerial() == pending_ecu.first) {
       continue;
     }
-    if (plan_in_progress &&
-        std::any_of(plan->members().cbegin(), plan->members().cend(),
-                    [&pending_ecu](const SyncPlan::Member &m) { return m.serial == pending_ecu.first.ToString(); })) {
+    if (plan && std::any_of(plan->members().cbegin(), plan->members().cend(),
+                            [&pending_ecu](const SyncPlan::Member &m) {
+                              return m.serial == pending_ecu.first.ToString();
+                            })) {
       LOG_INFO << "ECU " << pending_ecu.first << " is part of a sync group; the supervisor owns its update";
       continue;
     }
