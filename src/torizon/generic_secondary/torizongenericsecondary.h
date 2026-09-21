@@ -102,6 +102,7 @@ class TorizonGenericSecondary : public ManagedSecondary {
 
   boost::filesystem::path getNewFirmwarePath() const;
   boost::filesystem::path getNewTargetNamePath() const;
+  void stagePendingFirmware(const Uptane::Target& target);
 
   mutable VarMap shared_vars_;
   TorizonGenericSecondaryConfig config_;

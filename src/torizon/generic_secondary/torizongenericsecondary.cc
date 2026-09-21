@@ -307,17 +307,7 @@ data::InstallationResult TorizonGenericSecondary::sendFirmware(const Uptane::Tar
     return data::InstallationResult(result_code, output["message"].asString());
   }
 
-  const boost::filesystem::path new_fwpath = getNewFirmwarePath();
-  LOG_TRACE << "Creating " << new_fwpath;
-  auto strm = secondary_provider_->getTargetFileHandle(target);
-  std::ofstream out_file(new_fwpath.string(), std::ios::binary);
-  out_file << strm.rdbuf();
-  strm.close();
-  out_file.close();
-
-  const boost::filesystem::path new_tgtname = getNewTargetNamePath();
-  LOG_TRACE << "Storing target name " << target.filename() << " into " << new_tgtname;
-  Utils::writeFile(new_tgtname, target.filename());
+  stagePendingFirmware(target);
 
   return data::InstallationResult(data::ResultCode::Numeric::kOk, "");
 }
@@ -369,23 +359,9 @@ data::InstallationResult TorizonGenericSecondary::install(const Uptane::Target& 
 
   const std::string action{"install"};
 
-  // Create new firmware file with a temporary name.
+  stagePendingFirmware(target);
   boost::filesystem::path new_fwpath = getNewFirmwarePath();
-  {
-    LOG_TRACE << "Creating " << new_fwpath;
-    auto strm = secondary_provider_->getTargetFileHandle(target);
-    std::ofstream out_file(new_fwpath.string(), std::ios::binary);
-    out_file << strm.rdbuf();
-    strm.close();
-    out_file.close();
-  }
-
-  // Create new target-name file also with a temporary name.
   boost::filesystem::path new_tgtname = getNewTargetNamePath();
-  {
-    LOG_TRACE << "Storing target name " << target.filename() << " into " << new_tgtname;
-    Utils::writeFile(new_tgtname, target.filename());
-  }
 
   VarMap vars;
   getInstallVars(vars, target, info);
@@ -463,6 +439,20 @@ boost::filesystem::path TorizonGenericSecondary::getNewTargetNamePath() const {
     throw std::runtime_error(std::string(TorizonGenericSecondaryConfig::Type) + "target name path not configured");
   }
   return addNewExtension(config_.target_name_path);
+}
+
+void TorizonGenericSecondary::stagePendingFirmware(const Uptane::Target& target) {
+  const boost::filesystem::path new_fwpath = getNewFirmwarePath();
+  LOG_TRACE << "Creating " << new_fwpath;
+  auto strm = secondary_provider_->getTargetFileHandle(target);
+  std::ofstream out_file(new_fwpath.string(), std::ios::binary);
+  out_file << strm.rdbuf();
+  strm.close();
+  out_file.close();
+
+  const boost::filesystem::path new_tgtname = getNewTargetNamePath();
+  LOG_TRACE << "Storing target name " << target.filename() << " into " << new_tgtname;
+  Utils::writeFile(new_tgtname, target.filename());
 }
 
 void TorizonGenericSecondary::maybeFinishInstall(data::ResultCode::Numeric result_code,
