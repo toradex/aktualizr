@@ -218,7 +218,8 @@ class SotaUptaneClient {
                       const Uptane::Target &secondary_target, const Uptane::CorrelationId &correlation_id);
   boost::optional<SyncPlan> loadSyncPlan() const;
   void saveSyncPlan(const SyncPlan &plan);
-  void runSyncPlan(SyncPlan &plan, BootObservation boot, const Uptane::CorrelationId &correlation_id);
+  void runSyncPlan(SyncPlan &plan, BootObservation boot, const Uptane::CorrelationId &correlation_id,
+                   const boost::optional<data::InstallationResult> &primary_finalize);
   bool applySyncMember(SyncPlan &plan, const Uptane::EcuSerial &serial);
   void rollbackSyncMember(SyncPlan &plan, const Uptane::EcuSerial &serial, const Uptane::CorrelationId &correlation_id);
   void rollbackAppliedSyncMember(const SyncPlan::Member &member);
@@ -226,7 +227,8 @@ class SotaUptaneClient {
   void triggerOsRollback();
   void failSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id);
   void clearSyncMembersPending(const SyncPlan &plan, const Uptane::CorrelationId &correlation_id);
-  void commitSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id);
+  void commitSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id,
+                      const boost::optional<data::InstallationResult> &primary_finalize);
   bool sendSyncPlanManifest(SyncPlan &plan);
 
   Uptane::EcuSerial primaryEcuSerial() { return provisioner_.PrimaryEcuSerial(); }

@@ -250,6 +250,10 @@ TEST(UptaneUpdateFailure, SynchronousSecondaryUpdatesSuccess) {
   EXPECT_EQ(s.secondary->complete_pending_install_calls, 0);
   EXPECT_EQ(s.events["AllInstallsComplete"], 1);
 
+  boost::optional<Uptane::Target> pending_primary;
+  s.storage->loadInstalledVersions(s.conf.provision.primary_ecu_serial, nullptr, &pending_primary, nullptr);
+  ASSERT_TRUE(!!pending_primary);
+
   // Simulate a reboot
   s.Reboot();
   s.expected_install_report = data::ResultCode::Numeric::kOk;
@@ -260,12 +264,18 @@ TEST(UptaneUpdateFailure, SynchronousSecondaryUpdatesSuccess) {
   EXPECT_EQ(s.secondary->install_calls, 1) << "The apply happens on the boot into the new OS";
   EXPECT_EQ(s.secondary->complete_pending_install_calls, 0);
   EXPECT_EQ(s.events["AllInstallsComplete"], 1);
+
+  boost::optional<Uptane::Target> current_primary;
+  boost::optional<Uptane::Target> pending_after;
+  s.storage->loadInstalledVersions(s.conf.provision.primary_ecu_serial, &current_primary, &pending_after, nullptr);
+  ASSERT_TRUE(!!current_primary);
+  EXPECT_EQ(current_primary->sha256Hash(), pending_primary->sha256Hash());
+  EXPECT_FALSE(!!pending_after) << "The Primary is promoted only when the group commits";
 }
 
 /**
- * Power is lost after the OS finalize promoted the Primary but before the
- * Secondary was applied. Nothing is pending on the Primary on the next boot,
- * so the sync plan itself has to carry the group to a terminal state.
+ * Recovery if the Primary was stored as current before the Secondary applied.
+ * The normal path keeps the Primary pending until the group commits.
  */
 TEST(UptaneUpdateFailure, SynchronousSecondaryUpdatesResumeAfterPrimaryPromotion) {
   TestScaffolding s;  // NOLINT
@@ -280,8 +290,8 @@ TEST(UptaneUpdateFailure, SynchronousSecondaryUpdatesResumeAfterPrimaryPromotion
   EXPECT_EQ(install_result.dev_report.result_code, data::ResultCode::Numeric::kNeedCompletion);
   EXPECT_EQ(s.secondary->install_calls, 0);
 
-  // Promote the Primary the way finalizeAfterReboot() would have, then lose
-  // power before the Secondary apply.
+  // Store the Primary as current, as an interrupted finalize used to, then
+  // lose power before the Secondary apply.
   boost::optional<Uptane::Target> pending_primary;
   Uptane::CorrelationId correlation_id;
   s.storage->loadInstalledVersions(s.conf.provision.primary_ecu_serial, nullptr, &pending_primary, &correlation_id);
@@ -341,6 +351,10 @@ TEST(UptaneUpdateFailure, SynchronousSecondaryUpdatesFailure) {
   EXPECT_EQ(s.secondary->complete_pending_install_calls, 0);
   EXPECT_TRUE(s.dut->isInstallCompletionRequired());
 
+  boost::optional<Uptane::Target> pending_primary;
+  s.storage->loadInstalledVersions(s.conf.provision.primary_ecu_serial, nullptr, &pending_primary, nullptr);
+  ASSERT_TRUE(!!pending_primary);
+
   // Simulate a reboot
   s.Reboot();
   EXPECT_NO_THROW(s.dut->initialize());
@@ -349,6 +363,24 @@ TEST(UptaneUpdateFailure, SynchronousSecondaryUpdatesFailure) {
   EXPECT_EQ(s.secondary->send_firmware_calls, 1);
   EXPECT_EQ(s.secondary->complete_pending_install_calls, 0);
   EXPECT_EQ(s.secondary->rollback_pending_install_calls, 1) << "The failed apply is rolled back";
+
+  boost::optional<Uptane::Target> current_primary;
+  boost::optional<Uptane::Target> pending_after;
+  s.storage->loadInstalledVersions(s.conf.provision.primary_ecu_serial, &current_primary, &pending_after, nullptr);
+  EXPECT_FALSE(!!pending_after);
+  if (current_primary) {
+    EXPECT_NE(current_primary->sha256Hash(), pending_primary->sha256Hash())
+        << "A failed group must not leave the new OS stored as current";
+  }
+
+  // The rollback boot sends the failure manifest. This process did not reboot,
+  // so run startup once more to deliver it and clear the plan.
+  EXPECT_NO_THROW(s.dut->initialize());
+
+  // Case 3: Happy path. The Primary target is already installed, so this is
+  // not a sync group and the Secondary installs in this call.
+  s.storage->saveInstalledVersion(s.conf.provision.primary_ecu_serial, *pending_primary,
+                                  InstalledVersionUpdateMode::kCurrent, "id0");
 
   // Case 3: Happy path
   s.secondary->send_firmware_result = data::ResultCode::Numeric::kOk;

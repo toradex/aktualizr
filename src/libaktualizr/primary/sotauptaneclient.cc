@@ -215,14 +215,18 @@ void SotaUptaneClient::finalizeAfterReboot() {
   checkAndUpdatePendingSecondaries();
 
   if (!pending_target) {
-    // A sync plan outlives the Primary promotion: if power was lost between
-    // the OS finalize and the Secondary apply, nothing is pending on the
-    // Primary any more but the group is still half done. The new OS is
-    // already current, so the plan resumes from there.
+    // The Primary is normally still pending until the group commits. This is
+    // the recovery for a plan whose Primary row was already cleared: either a
+    // failed plan waiting to send its manifest, or an in-progress plan whose
+    // Primary was stored as current before the Secondary applied.
     boost::optional<SyncPlan> resumed_plan = loadSyncPlan();
-    if (resumed_plan && resumed_plan->outcome() == SyncPlan::Outcome::kInProgress) {
-      LOG_INFO << "Resuming a sync plan that was left in progress on the current OS";
-      runSyncPlan(*resumed_plan, BootObservation::kNewOsBooted, resumed_plan->correlationId());
+    if (resumed_plan &&
+        (resumed_plan->outcome() == SyncPlan::Outcome::kInProgress || resumed_plan->manifestPending())) {
+      const BootObservation boot = resumed_plan->outcome() == SyncPlan::Outcome::kInProgress
+                                       ? BootObservation::kNewOsBooted
+                                       : BootObservation::kRolledBack;
+      LOG_INFO << "Resuming a sync plan with no pending Primary version";
+      runSyncPlan(*resumed_plan, boot, resumed_plan->correlationId(), boost::none);
       return;
     }
     LOG_ERROR << "No pending update for Primary ECU found, continuing with initialization";
@@ -241,29 +245,40 @@ void SotaUptaneClient::finalizeAfterReboot() {
     return;
   }
 
-  storage->saveEcuInstallationResult(primary_ecu_serial, install_res);
+  boost::optional<SyncPlan> plan = loadSyncPlan();
+  // A matching hash means the new OS booted. The group has not committed yet,
+  // so the Primary stays pending and no success report is queued until then.
+  const bool hold_primary_until_commit =
+      install_res.success && plan && plan->outcome() == SyncPlan::Outcome::kInProgress;
 
-  if (install_res.success) {
-    storage->saveInstalledVersion(primary_ecu_serial.ToString(), *pending_target, InstalledVersionUpdateMode::kCurrent,
-                                  correlation_id);
+  if (!hold_primary_until_commit) {
+    storage->saveEcuInstallationResult(primary_ecu_serial, install_res);
 
-    report_queue->enqueue(std_::make_unique<EcuInstallationCompletedReport>(primary_ecu_serial, correlation_id, true));
-  } else {
-    // finalize failed, unset pending flag so that the rest of the Uptane process can go forward again
-    storage->saveInstalledVersion(primary_ecu_serial.ToString(), *pending_target, InstalledVersionUpdateMode::kNone,
-                                  correlation_id);
-    report_queue->enqueue(std_::make_unique<EcuInstallationCompletedReport>(primary_ecu_serial, correlation_id, false));
+    if (install_res.success) {
+      storage->saveInstalledVersion(primary_ecu_serial.ToString(), *pending_target,
+                                    InstalledVersionUpdateMode::kCurrent, correlation_id);
+
+      report_queue->enqueue(
+          std_::make_unique<EcuInstallationCompletedReport>(primary_ecu_serial, correlation_id, true));
+    } else {
+      // finalize failed, unset pending flag so that the rest of the Uptane process can go forward again
+      storage->saveInstalledVersion(primary_ecu_serial.ToString(), *pending_target, InstalledVersionUpdateMode::kNone,
+                                    correlation_id);
+      report_queue->enqueue(
+          std_::make_unique<EcuInstallationCompletedReport>(primary_ecu_serial, correlation_id, false));
+    }
   }
 
   director_repo.dropTargets(*storage);  // fix for OTA-2587, listen to backend again after end of install
 
-  boost::optional<SyncPlan> plan = loadSyncPlan();
   if (plan && (plan->outcome() == SyncPlan::Outcome::kInProgress || plan->manifestPending())) {
     // The OS finalize decides what the group saw on this boot: a successful
     // finalize means we are running the new OS, any failure means the OS we
     // deployed is not the one that came up.
     const BootObservation boot = install_res.success ? BootObservation::kNewOsBooted : BootObservation::kRolledBack;
-    runSyncPlan(*plan, boot, correlation_id);
+    const boost::optional<data::InstallationResult> primary_finalize =
+        hold_primary_until_commit ? boost::optional<data::InstallationResult>(install_res) : boost::none;
+    runSyncPlan(*plan, boot, correlation_id, primary_finalize);
     return;
   }
 
@@ -330,7 +345,8 @@ bool SotaUptaneClient::stageSyncGroup(const Uptane::EcuSerial &primary_ecu_seria
   return true;
 }
 
-void SotaUptaneClient::runSyncPlan(SyncPlan &plan, BootObservation boot, const Uptane::CorrelationId &correlation_id) {
+void SotaUptaneClient::runSyncPlan(SyncPlan &plan, BootObservation boot, const Uptane::CorrelationId &correlation_id,
+                                  const boost::optional<data::InstallationResult> &primary_finalize) {
   for (;;) {
     SupervisorStep step{SupervisorAction::kWaitForReboot, {}};
     try {
@@ -361,7 +377,7 @@ void SotaUptaneClient::runSyncPlan(SyncPlan &plan, BootObservation boot, const U
         failSyncPlan(plan, correlation_id);
         return;
       case SupervisorAction::kCommitAndReport:
-        commitSyncPlan(plan, correlation_id);
+        commitSyncPlan(plan, correlation_id, primary_finalize);
         return;
       case SupervisorAction::kRetryManifest:
         sendSyncPlanManifest(plan);
@@ -493,7 +509,8 @@ void SotaUptaneClient::failSyncPlan(SyncPlan &plan, const Uptane::CorrelationId 
   sendSyncPlanManifest(plan);
 }
 
-void SotaUptaneClient::commitSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id) {
+void SotaUptaneClient::commitSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id,
+                                     const boost::optional<data::InstallationResult> &primary_finalize) {
   try {
     plan.markCommitted();
   } catch (const std::exception &ex) {
@@ -502,13 +519,8 @@ void SotaUptaneClient::commitSyncPlan(SyncPlan &plan, const Uptane::CorrelationI
   }
   saveSyncPlan(plan);
 
-  // The Primary was promoted by finalizeAfterReboot(); the Secondaries were
-  // held pending until the whole group succeeded.
   const std::string primary_serial = primaryEcuSerial().ToString();
   for (const auto &member : plan.members()) {
-    if (member.serial == primary_serial) {
-      continue;
-    }
     const Uptane::EcuSerial serial(member.serial);
     boost::optional<Uptane::Target> pending_target;
     Uptane::CorrelationId member_correlation_id;
@@ -518,6 +530,9 @@ void SotaUptaneClient::commitSyncPlan(SyncPlan &plan, const Uptane::CorrelationI
     }
     storage->saveInstalledVersion(member.serial, *pending_target, InstalledVersionUpdateMode::kCurrent,
                                   member_correlation_id);
+    if (member.serial == primary_serial && primary_finalize) {
+      storage->saveEcuInstallationResult(serial, *primary_finalize);
+    }
     report_queue->enqueue(std_::make_unique<EcuInstallationCompletedReport>(serial, member_correlation_id, true));
   }
 
@@ -532,11 +547,7 @@ void SotaUptaneClient::clearSyncMembersPending(const SyncPlan &plan, const Uptan
   std::vector<std::pair<Uptane::EcuSerial, data::InstallationResult>> ecu_results;
   storage->loadEcuInstallationResults(&ecu_results);
 
-  const std::string primary_serial = primaryEcuSerial().ToString();
   for (const auto &member : plan.members()) {
-    if (member.serial == primary_serial) {
-      continue;
-    }
     const Uptane::EcuSerial serial(member.serial);
     boost::optional<Uptane::Target> pending_target;
     Uptane::CorrelationId member_correlation_id;
