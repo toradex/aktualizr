@@ -1704,6 +1704,45 @@ void SQLStorage::clearDeviceData() {
   }
 }
 
+void SQLStorage::saveSyncPlan(const std::string& json) {
+  SQLite3Guard db = dbConnection();
+
+  auto statement =
+      db.prepareStatement<std::string>("INSERT OR REPLACE INTO sync_plan(unique_mark,json) VALUES(0,?);", json);
+  if (statement.step() != SQLITE_DONE) {
+    LOG_ERROR << "Failed to save sync plan: " << db.errmsg();
+    throw SQLException(std::string("Failed to save sync plan: ") + db.errmsg());
+  }
+}
+
+bool SQLStorage::loadSyncPlan(std::string* json) const {
+  SQLite3Guard db = dbConnection();
+
+  auto statement = db.prepareStatement("SELECT json FROM sync_plan WHERE unique_mark = 0;");
+  const int result = statement.step();
+  if (result == SQLITE_DONE) {
+    return false;
+  }
+  if (result != SQLITE_ROW) {
+    LOG_ERROR << "Failed to load sync plan: " << db.errmsg();
+    throw SQLException(std::string("Failed to load sync plan: ") + db.errmsg());
+  }
+
+  if (json != nullptr) {
+    *json = statement.get_result_col_str(0).value();
+  }
+  return true;
+}
+
+void SQLStorage::clearSyncPlan() {
+  SQLite3Guard db = dbConnection();
+
+  if (db.exec("DELETE FROM sync_plan;", nullptr, nullptr) != SQLITE_OK) {
+    LOG_ERROR << "Failed to clear sync plan: " << db.errmsg();
+    throw SQLException(std::string("Failed to clear sync plan: ") + db.errmsg());
+  }
+}
+
 void SQLStorage::storeTargetFilename(const std::string& targetname, const std::string& filename) const {
   SQLite3Guard db = dbConnection();
   auto statement = db.prepareStatement<std::string, std::string>(

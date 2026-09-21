@@ -1,5 +1,5 @@
 CREATE TABLE version(version INTEGER);
-INSERT INTO version(rowid,version) VALUES(1,28);
+INSERT INTO version(rowid,version) VALUES(1,29);
 CREATE TABLE device_info(unique_mark INTEGER PRIMARY KEY CHECK (unique_mark = 0), device_id TEXT, is_registered INTEGER NOT NULL DEFAULT 0 CHECK (is_registered IN (0,1)), offline_update_path TEXT);
 CREATE TABLE ecus(id INTEGER PRIMARY KEY, serial TEXT UNIQUE, hardware_id TEXT NOT NULL, is_primary INTEGER NOT NULL DEFAULT 0 CHECK (is_primary IN (0,1)));
 CREATE TABLE secondary_ecus(serial TEXT PRIMARY KEY, sec_type TEXT, public_key_type TEXT, public_key TEXT, extra TEXT, manifest TEXT);
@@ -30,3 +30,4 @@ CREATE TABLE ecu_report_counter(ecu_serial TEXT NOT NULL PRIMARY KEY, counter IN
 CREATE TABLE report_events(id INTEGER PRIMARY KEY, json_string TEXT NOT NULL);
 CREATE TABLE device_data(data_type TEXT PRIMARY KEY, hash TEXT NOT NULL);
 CREATE TABLE consent_config(property TEXT PRIMARY KEY, value INT NOT NULL);
+CREATE TABLE sync_plan(unique_mark INTEGER PRIMARY KEY CHECK (unique_mark = 0), json TEXT NOT NULL);

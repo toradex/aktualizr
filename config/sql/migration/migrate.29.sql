@@ -1,0 +1,8 @@
+SAVEPOINT MIGRATION;
+CREATE TABLE sync_plan(
+  unique_mark INTEGER PRIMARY KEY CHECK (unique_mark = 0),
+  json TEXT NOT NULL
+);
+DELETE FROM version;
+INSERT INTO version VALUES(29);
+RELEASE MIGRATION;

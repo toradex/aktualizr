@@ -146,6 +146,10 @@ class INvStorage {
   virtual bool loadDeviceDataHash(const std::string& data_type, std::string* hash) const = 0;
   virtual void clearDeviceData() = 0;
 
+  virtual void saveSyncPlan(const std::string& json) = 0;
+  virtual bool loadSyncPlan(std::string* json) const = 0;
+  virtual void clearSyncPlan() = 0;
+
   // Downloaded files info API
   virtual void storeTargetFilename(const std::string& targetname, const std::string& filename) const = 0;
   virtual std::string getTargetFilename(const std::string& targetname) const = 0;

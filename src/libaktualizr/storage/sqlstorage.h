@@ -108,6 +108,10 @@ class SQLStorage : public SQLStorageBase, public INvStorage {
   bool loadDeviceDataHash(const std::string& data_type, std::string* hash) const override;
   void clearDeviceData() override;
 
+  void saveSyncPlan(const std::string& json) override;
+  bool loadSyncPlan(std::string* json) const override;
+  void clearSyncPlan() override;
+
   void storeTargetFilename(const std::string& targetname, const std::string& filename) const override;
   std::string getTargetFilename(const std::string& targetname) const override;
   std::vector<std::string> getAllTargetNames() const override;

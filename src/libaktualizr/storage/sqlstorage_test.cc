@@ -4,6 +4,7 @@
 #include <boost/tokenizer.hpp>
 
 #include "logging/logging.h"
+#include "primary/sync_plan.h"
 #include "storage/sql_utils.h"
 #include "storage/sqlstorage.h"
 #include "uptane/directorrepository.h"
@@ -541,6 +542,25 @@ TEST(sqlstorage, store_and_load_report_events) {
     storage->deleteReportEvents(max_id);
     processed_events += l;
   }
+}
+
+TEST(sqlstorage, SyncPlan) {
+  TemporaryDirectory temp_dir;
+  StorageConfig config;
+  config.path = temp_dir.Path();
+  auto storage = INvStorage::newStorage(config);
+
+  const auto plan = SyncPlan::Create(
+      "c", {{"primary", "primary-hardware", SyncPlan::Phase::kStaged, false},
+            {"secondary", "secondary-hardware", SyncPlan::Phase::kStaged, false}});
+  storage->saveSyncPlan(Utils::jsonToCanonicalStr(plan.toJson()));
+
+  std::string json;
+  ASSERT_TRUE(storage->loadSyncPlan(&json));
+  EXPECT_EQ(SyncPlan::fromJson(Utils::parseJSON(json)).correlationId(), plan.correlationId());
+
+  storage->clearSyncPlan();
+  EXPECT_FALSE(storage->loadSyncPlan(&json));
 }
 
 TEST(sqlstorage, Consent) {
