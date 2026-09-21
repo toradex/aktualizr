@@ -596,12 +596,15 @@ void SotaUptaneClient::clearSyncMembersPending(const SyncPlan &plan, const Uptan
     if (!pending_target) {
       continue;
     }
-    const bool have_result =
+    const auto existing =
         std::find_if(ecu_results.cbegin(), ecu_results.cend(),
                      [&serial](const std::pair<Uptane::EcuSerial, data::InstallationResult> &r) {
                        return r.first == serial;
-                     }) != ecu_results.cend();
-    if (!have_result) {
+                     });
+    // A need-completion result is the OS waiting to boot, not a finished
+    // outcome. Once the group has failed that wait is over.
+    const bool have_terminal_result = existing != ecu_results.cend() && !existing->second.needCompletion();
+    if (!have_terminal_result) {
       storage->saveEcuInstallationResult(
           serial, data::InstallationResult(data::ResultCode::Numeric::kInstallFailed,
                                            "The synchronous update this ECU belonged to failed"));

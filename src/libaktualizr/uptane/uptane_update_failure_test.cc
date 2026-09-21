@@ -406,6 +406,61 @@ TEST(UptaneUpdateFailure, SynchronousSecondaryUpdatesFailure) {
 }
 
 /**
+ * A compose install that asks for a later completion fails the group. The
+ * stored result is a failure, and completePendingInstall is not used.
+ */
+TEST(UptaneUpdateFailure, SynchronousSecondaryNeedCompletionFailsThePlan) {
+  TestScaffolding s;  // NOLINT
+
+  EXPECT_NO_THROW(s.dut->initialize());
+  result::UpdateCheck const update_result = s.dut->fetchMeta();
+  result::Download const download_result = s.dut->downloadImages(update_result.updates);
+  EXPECT_EQ(download_result.status, result::DownloadStatus::kSuccess);
+
+  s.secondary->install_result = data::ResultCode::Numeric::kNeedCompletion;
+  s.expected_install_report = data::ResultCode::Numeric::kNeedCompletion;
+  result::Install const install_result = s.dut->uptaneInstall(download_result.updates);
+  EXPECT_EQ(install_result.dev_report.result_code, data::ResultCode::Numeric::kNeedCompletion);
+  EXPECT_EQ(s.secondary->install_calls, 0);
+
+  boost::optional<Uptane::Target> pending_primary;
+  s.storage->loadInstalledVersions(s.conf.provision.primary_ecu_serial, nullptr, &pending_primary, nullptr);
+  ASSERT_TRUE(!!pending_primary);
+
+  s.Reboot();
+  EXPECT_NO_THROW(s.dut->initialize());
+
+  EXPECT_EQ(s.secondary->install_calls, 1);
+  EXPECT_EQ(s.secondary->complete_pending_install_calls, 0);
+  EXPECT_EQ(s.secondary->rollback_pending_install_calls, 1);
+
+  boost::optional<Uptane::Target> current_primary;
+  boost::optional<Uptane::Target> pending_after;
+  s.storage->loadInstalledVersions(s.conf.provision.primary_ecu_serial, &current_primary, &pending_after, nullptr);
+  EXPECT_FALSE(!!pending_after);
+  if (current_primary) {
+    EXPECT_NE(current_primary->sha256Hash(), pending_primary->sha256Hash());
+  }
+
+  std::vector<std::pair<Uptane::EcuSerial, data::InstallationResult>> ecu_results;
+  ASSERT_TRUE(s.storage->loadEcuInstallationResults(&ecu_results));
+  const auto secondary_result = std::find_if(
+      ecu_results.cbegin(), ecu_results.cend(),
+      [](const std::pair<Uptane::EcuSerial, data::InstallationResult> &r) {
+        return r.first.ToString() == "secondary_ecu_serial";
+      });
+  ASSERT_NE(secondary_result, ecu_results.cend());
+  EXPECT_EQ(secondary_result->second.result_code.num_code, data::ResultCode::Numeric::kInstallFailed);
+  EXPECT_EQ(secondary_result->second.description, "A sync group install must not return need-completion");
+
+  EXPECT_NO_THROW(s.dut->initialize());
+  const auto report = s.http->last_manifest["signed"]["installation_report"];
+  EXPECT_EQ(report["report"]["items"][1]["result"]["code"].asString(), "INSTALL_FAILED");
+  EXPECT_EQ(report["report"]["result"]["code"].asString().find("NEED_COMPLETION"), std::string::npos)
+      << report["report"]["result"]["code"].asString();
+}
+
+/**
  * The user cancels during an installation
  */
 TEST(UptaneUpdateFailure, Cancellation) {
