@@ -365,11 +365,12 @@ Uptane::Target explicitTarget(Uptane::Target target, const std::string &serial, 
   Json::Value custom = target.custom_data();
   custom["ecuIdentifiers"] = Json::Value(Json::objectValue);
   custom["ecuIdentifiers"][serial]["hardwareId"] = hardware_id;
-  custom["sync_group_id"] = group_id;
+  // TEMPORARY: match Torizon Cloud nesting under userDefinedCustom.
+  custom["userDefinedCustom"]["sync_group_id"] = group_id;
   if (order) {
-    custom["sync_order"] = *order;
+    custom["userDefinedCustom"]["sync_order"] = *order;
   } else {
-    custom.removeMember("sync_order");
+    custom["userDefinedCustom"].removeMember("sync_order");
   }
   target.updateCustom(custom);
   return target;

@@ -38,7 +38,8 @@ static Uptane::Target makeTarget(bool sync_group) {
   target_json["hashes"]["sha256"] = "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb";
   target_json["custom"]["uri"] = "test-uri";
   if (sync_group) {
-    target_json["custom"]["sync_group_id"] = "group-a";
+    // TEMPORARY: match Torizon Cloud nesting under userDefinedCustom.
+    target_json["custom"]["userDefinedCustom"]["sync_group_id"] = "group-a";
   }
   target_json["length"] = 1;
   return Uptane::Target("fake_file", target_json);

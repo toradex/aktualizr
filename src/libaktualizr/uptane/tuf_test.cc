@@ -291,8 +291,8 @@ TEST(Target, SyncFieldsAbsent) {
 
 TEST(Target, SyncFieldsPresent) {
   Json::Value content = generateDirectorTarget("hash", 1, {});
-  content["custom"]["sync_group_id"] = "group-a";
-  content["custom"]["sync_order"] = 2;
+  content["custom"]["userDefinedCustom"]["sync_group_id"] = "group-a";
+  content["custom"]["userDefinedCustom"]["sync_order"] = 2;
   Uptane::Target target("abc", content);
   ASSERT_TRUE(target.syncGroupId());
   EXPECT_EQ(*target.syncGroupId(), "group-a");
@@ -300,9 +300,18 @@ TEST(Target, SyncFieldsPresent) {
   EXPECT_EQ(*target.syncOrder(), 2);
 }
 
+TEST(Target, SyncFieldsIgnoreTopLevel) {
+  Json::Value content = generateDirectorTarget("hash", 1, {});
+  content["custom"]["sync_group_id"] = "group-a";
+  content["custom"]["sync_order"] = 2;
+  Uptane::Target target("abc", content);
+  EXPECT_FALSE(target.syncGroupId());
+  EXPECT_FALSE(target.syncOrder());
+}
+
 TEST(Target, SyncFieldsWrongType) {
   Json::Value content = generateDirectorTarget("hash", 1, {});
-  content["custom"]["sync_group_id"] = 1;
+  content["custom"]["userDefinedCustom"]["sync_group_id"] = 1;
   Uptane::Target target("abc", content);
   EXPECT_THROW(target.syncGroupId(), std::runtime_error);
 }

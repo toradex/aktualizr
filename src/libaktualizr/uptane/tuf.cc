@@ -177,14 +177,26 @@ std::string Target::custom_version() const {
   }
 }
 
+// TEMPORARY (revert before production): Torizon Cloud places POST /updates
+// custom.metadata under Director custom.userDefinedCustom. Read sync fields
+// from that object only so device smoke tests match the live API.
+static const Json::Value &syncMetadata(const Json::Value &custom) {
+  static const Json::Value kEmpty;
+  if (custom.isMember("userDefinedCustom") && custom["userDefinedCustom"].isObject()) {
+    return custom["userDefinedCustom"];
+  }
+  return kEmpty;
+}
+
 boost::optional<std::string> Target::syncGroupId() const {
-  if (!custom_.isMember("sync_group_id")) {
+  const Json::Value &meta = syncMetadata(custom_);
+  if (!meta.isMember("sync_group_id")) {
     return boost::none;
   }
-  if (!custom_["sync_group_id"].isString()) {
+  if (!meta["sync_group_id"].isString()) {
     throw std::runtime_error("sync_group_id must be a string");
   }
-  const std::string id = custom_["sync_group_id"].asString();
+  const std::string id = meta["sync_group_id"].asString();
   if (id.empty()) {
     throw std::runtime_error("sync_group_id must be a non-empty string");
   }
@@ -192,13 +204,14 @@ boost::optional<std::string> Target::syncGroupId() const {
 }
 
 boost::optional<int> Target::syncOrder() const {
-  if (!custom_.isMember("sync_order")) {
+  const Json::Value &meta = syncMetadata(custom_);
+  if (!meta.isMember("sync_order")) {
     return boost::none;
   }
-  if (!custom_["sync_order"].isInt()) {
+  if (!meta["sync_order"].isInt()) {
     throw std::runtime_error("sync_order must be an integer");
   }
-  return custom_["sync_order"].asInt();
+  return meta["sync_order"].asInt();
 }
 
 bool Target::IsOstree() const {
