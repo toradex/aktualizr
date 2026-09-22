@@ -469,21 +469,11 @@ void SotaUptaneClient::rollbackSyncMember(SyncPlan &plan, const Uptane::EcuSeria
     }
   }
 
-  if (plan.ostreeInGroup()) {
-    if (!armOsRollback()) {
-      return;
-    }
-  }
-
   plan.markFailed();
   saveSyncPlan(plan);
   clearSyncMembersPending(plan, correlation_id);
   copyStoredDeviceInstallationResult(final_result, raw_report);
-  if (plan.ostreeInGroup()) {
-    rebootForOsRollback();
-  } else {
-    sendSyncPlanManifest(plan);
-  }
+  rebootOrReportOsRollback(plan);
 }
 
 void SotaUptaneClient::abortSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id,
@@ -497,12 +487,6 @@ void SotaUptaneClient::abortSyncPlan(SyncPlan &plan, const Uptane::CorrelationId
     }
   }
 
-  if (plan.ostreeInGroup()) {
-    if (!armOsRollback()) {
-      return;
-    }
-  }
-
   plan.markFailed();
   if (plan.ostreeInGroup()) {
     // The OS is going back, so the Primary belongs to this failure as well.
@@ -513,11 +497,7 @@ void SotaUptaneClient::abortSyncPlan(SyncPlan &plan, const Uptane::CorrelationId
   clearSyncMembersPending(plan, correlation_id);
   saveSyncPlan(plan);
   copyStoredDeviceInstallationResult(final_result, raw_report);
-  if (plan.ostreeInGroup()) {
-    rebootForOsRollback();
-  } else {
-    sendSyncPlanManifest(plan);
-  }
+  rebootOrReportOsRollback(plan);
 }
 
 void SotaUptaneClient::rollbackAppliedSyncMember(const SyncPlan::Member &member) {
@@ -549,6 +529,16 @@ bool SotaUptaneClient::armOsRollback() {
     return false;
   }
   return true;
+}
+
+void SotaUptaneClient::rebootOrReportOsRollback(SyncPlan &plan) {
+  if (plan.ostreeInGroup() && armOsRollback()) {
+    rebootForOsRollback();
+    return;
+  }
+  // No OS member, or the bootloader flag was not set. Stay on this boot and
+  // report the failure that was stored before the arm attempt.
+  sendSyncPlanManifest(plan);
 }
 
 void SotaUptaneClient::rebootForOsRollback() {

@@ -183,6 +183,7 @@ struct TestOptions {
   bool primary_installs_on_reboot{true};
   bool explicit_secondary{false};
   bool secondary_supports_rollback{false};
+  bool fail_os_rollback{false};
   int explicit_members{0};
 };
 
@@ -299,10 +300,13 @@ struct TestScaffolding {
     conf.bootloader.reboot_sentinel_dir = temp_dir.Path();
     // A sync group rollback runs the real Bootloader::reboot(), which would
     // otherwise try to run /sbin/reboot on the machine running the tests.
-    conf.bootloader.reboot_command = "/bin/true";
-    // The CI image has no fw_setenv. A failing command must not mark the plan
-    // failed, so the tests use a command that succeeds.
-    conf.bootloader.rollback_command = "/bin/true";
+    const boost::filesystem::path reboot_marker = temp_dir.Path() / "os-rollback-rebooted";
+    conf.bootloader.reboot_command =
+        test_options.fail_os_rollback ? "touch " + reboot_marker.string() : std::string("/bin/true");
+    // The CI image has no fw_setenv. The failure case uses a command that
+    // fails so the test can see that the plan is already failed and no reboot
+    // was requested.
+    conf.bootloader.rollback_command = test_options.fail_os_rollback ? "/bin/false" : "/bin/true";
     conf.pacman.fake_need_reboot = test_options.primary_installs_on_reboot;
     conf.pacman.fake_fail_install = test_options.fail_primary_install;
 
@@ -562,6 +566,41 @@ TEST(UptaneUpdateFailure, SynchronousSecondaryUpdatesFailure) {
   EXPECT_EQ(s.secondary->send_firmware_calls, 1);
   EXPECT_EQ(s.secondary->complete_pending_install_calls, 0);
   EXPECT_FALSE(s.dut->isInstallCompletionRequired());
+}
+
+/**
+ * The failed plan is stored before fw_setenv. A failing rollback command does
+ * not reboot, and the failure manifest is sent on this boot.
+ */
+TEST(UptaneUpdateFailure, SynchronousOsRollbackPersistsFailureBeforeArming) {
+  TestOptions options;
+  options.fail_os_rollback = true;
+  TestScaffolding s(options);  // NOLINT
+
+  EXPECT_NO_THROW(s.dut->initialize());
+  const result::UpdateCheck update_result = s.dut->fetchMeta();
+  const result::Download download_result = s.dut->downloadImages(update_result.updates);
+  EXPECT_EQ(download_result.status, result::DownloadStatus::kSuccess);
+
+  s.secondary->install_result = data::ResultCode::Numeric::kInstallFailed;
+  s.expected_install_report = data::ResultCode::Numeric::kNeedCompletion;
+  const result::Install install_result = s.dut->uptaneInstall(download_result.updates);
+  EXPECT_EQ(install_result.dev_report.result_code, data::ResultCode::Numeric::kNeedCompletion);
+
+  boost::optional<Uptane::Target> pending_primary;
+  s.storage->loadInstalledVersions(s.conf.provision.primary_ecu_serial, nullptr, &pending_primary, nullptr);
+  ASSERT_TRUE(!!pending_primary);
+
+  s.Reboot();
+  EXPECT_NO_THROW(s.dut->initialize());
+
+  EXPECT_EQ(s.secondary->rollback_pending_install_calls, 1);
+  EXPECT_FALSE(boost::filesystem::exists(s.conf.storage.path / "os-rollback-rebooted"));
+  boost::optional<Uptane::Target> pending_after;
+  s.storage->loadInstalledVersions(s.conf.provision.primary_ecu_serial, nullptr, &pending_after, nullptr);
+  EXPECT_FALSE(!!pending_after);
+  std::string stored_plan;
+  EXPECT_FALSE(s.storage->loadSyncPlan(&stored_plan));
 }
 
 /**

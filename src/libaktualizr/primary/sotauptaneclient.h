@@ -229,9 +229,11 @@ class SotaUptaneClient {
   void rollbackAppliedSyncMember(const SyncPlan::Member &member);
   void abortSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id,
                      data::InstallationResult *final_result = nullptr, std::string *raw_report = nullptr);
-  // Returns false when the bootloader rollback flag could not be set. The
-  // caller must not reboot or mark the plan failed in that case.
+  // Returns false when the bootloader rollback flag could not be set.
   bool armOsRollback();
+  // The plan is already failed. Reboot only after the flag is set. Otherwise
+  // send the failure manifest and stay on the new OS.
+  void rebootOrReportOsRollback(SyncPlan &plan);
   void rebootForOsRollback();
   void failSyncPlan(SyncPlan &plan, const Uptane::CorrelationId &correlation_id,
                     data::InstallationResult *final_result = nullptr, std::string *raw_report = nullptr);
