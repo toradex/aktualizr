@@ -3,6 +3,16 @@ LABEL Description="Aktualizr CI image using Debian Bullseye (oldstable)"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Bullseye is EOL (LTS ended 2026-08-31) and its .debs are vanishing from the live
+# mirrors, 404-ing apt. Pin every suite to a last-day-of-LTS snapshot. See TOR-4735.
+# Use http:// since the base image has no ca-certificates yet; GPG still verifies.
+RUN printf '%s\n' \
+  'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260831T204404Z bullseye main' \
+  'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260831T204404Z bullseye-updates main' \
+  'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260831T211327Z bullseye-security main' \
+  > /etc/apt/sources.list \
+  && rm -f /etc/apt/sources.list.d/*.list
+
 RUN apt-get update && apt-get -y install --no-install-suggests --no-install-recommends debian-archive-keyring
 
 

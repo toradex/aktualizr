@@ -65,7 +65,9 @@ stages:
     - echo -e "\e[0Ksection_end:$(date +%s):build_container\r\e[0K"
 
     - echo -e "\e[0Ksection_start:$(date +%s):update_registry\r\e[0KUpdate Docker cache"
-    - ${E} docker push "${tag}"
+    # Pushing only refreshes the layer cache; a registry hiccup (e.g. "blob unknown
+    # to registry") must not fail the whole test job. See TOR-4735.
+    - ${E} docker push "${tag}" || true
     - echo -e "\e[0Ksection_end:$(date +%s):update_registry\r\e[0K"
 
     # Helpers to run commands inside the test container (available in the "script" section).
