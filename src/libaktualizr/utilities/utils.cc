@@ -841,7 +841,7 @@ std::string Utils::urlEncode(const std::string &input) {
 std::string Utils::redactUrlQueryStrings(const std::string &input) {
   std::string res;
   res.reserve(input.size());
-  bool in_url = false;         // seen a "scheme://" since the last whitespace
+  bool in_url = false;          // seen a "scheme://" since the last whitespace
   bool skipping_query = false;  // currently dropping a URL's query string
   size_t i = 0;
   const size_t n = input.size();

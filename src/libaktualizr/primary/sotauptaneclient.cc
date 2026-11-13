@@ -47,9 +47,9 @@ static void appendEcuFailureDescription(std::string *aggregate, const std::strin
     return;
   }
   static constexpr size_t kMaxPerEcuDescriptionLength = 256;
-  std::string bounded =
-      description.length() > kMaxPerEcuDescriptionLength ? description.substr(0, kMaxPerEcuDescriptionLength) + "..."
-                                                         : description;
+  std::string bounded = description.length() > kMaxPerEcuDescriptionLength
+                            ? description.substr(0, kMaxPerEcuDescriptionLength) + "..."
+                            : description;
   *aggregate += (!aggregate->empty() ? " | " : "") + hw_id + ": " + bounded;
 }
 
