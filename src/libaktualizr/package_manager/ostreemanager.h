@@ -2,7 +2,9 @@
 #define OSTREE_H_
 
 #include <boost/optional/optional.hpp>
+#include <chrono>
 #include <memory>
+#include <random>
 #include <string>
 #include <unordered_map>
 
@@ -36,6 +38,17 @@ struct PullMetaStruct {
   const api::FlowControlToken *token;
   GObjectUniquePtr<GCancellable> cancellable;
   OstreeProgressCb progress_cb;
+};
+
+struct OstreePullRetryPolicy {
+  uint32_t retries{0};
+  std::chrono::seconds initial_delay{0};
+  std::chrono::seconds max_delay{0};
+
+  static OstreePullRetryPolicy fromConfig(const PackageConfig &config);
+  std::chrono::seconds delayBefore(uint32_t retry) const;
+  static std::chrono::milliseconds jitter(std::chrono::seconds delay, std::mt19937 &rng);
+  static bool isRetryable(const GError *error);
 };
 
 class OstreeManager : public PackageManagerInterface {
@@ -75,7 +88,8 @@ class OstreeManager : public PackageManagerInterface {
       const boost::filesystem::path &sysroot_path, const std::string &ostree_server, const KeyManager &keys,
       const Uptane::Target &target, const api::FlowControlToken *token = nullptr,
       OstreeProgressCb progress_cb = nullptr, const char *alt_remote = nullptr,
-      boost::optional<std::unordered_map<std::string, std::string>> headers = boost::none);
+      boost::optional<std::unordered_map<std::string, std::string>> headers = boost::none,
+      const OstreePullRetryPolicy &retry_policy = OstreePullRetryPolicy{});
 
 #ifdef BUILD_OFFLINE_UPDATES
   static data::InstallationResult pullLocal(const boost::filesystem::path &sysroot_path,

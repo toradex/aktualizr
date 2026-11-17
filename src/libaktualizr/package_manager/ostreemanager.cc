@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <cstdio>
 #include <fstream>
+#include <mutex>
 
 #include <gio/gio.h>
 #include <json/json.h>
@@ -11,6 +12,7 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/filesystem.hpp>
+#include <thread>
 #include <utility>
 
 #include "libaktualizr/packagemanagerfactory.h"
@@ -69,14 +71,95 @@ static void aktualizr_progress_cb(OstreeAsyncProgress *progress, gpointer data) 
   }
 }
 
+OstreePullRetryPolicy OstreePullRetryPolicy::fromConfig(const PackageConfig &config) {
+  OstreePullRetryPolicy policy;
+  if (config.ostree_pull_retry) {
+    policy.retries = config.ostree_pull_retries;
+    policy.initial_delay = std::chrono::seconds(config.ostree_pull_retry_delay);
+    policy.max_delay = std::chrono::seconds(config.ostree_pull_retry_max_delay);
+  }
+  return policy;
+}
+
+std::chrono::seconds OstreePullRetryPolicy::delayBefore(uint32_t retry) const {
+  std::chrono::seconds delay = initial_delay;
+  for (uint32_t i = 1; i < retry && delay < max_delay; ++i) {
+    delay *= 2;
+  }
+  return std::min(delay, max_delay);
+}
+
+std::chrono::milliseconds OstreePullRetryPolicy::jitter(std::chrono::seconds delay, std::mt19937 &rng) {
+  const auto upper = std::chrono::duration_cast<std::chrono::milliseconds>(delay).count();
+  std::uniform_int_distribution<int64_t> dist(upper / 2, upper);
+  return std::chrono::milliseconds(dist(rng));
+}
+
+bool OstreePullRetryPolicy::isRetryable(const GError *error) {
+  if (error == nullptr) {
+    return false;
+  }
+  // Mirrors _ostree_fetcher_should_retry_request(). With libcurl, libostree reports HTTP 5xx and curl
+  // failures as G_IO_ERROR_TIMED_OUT (retry-all-network-errors defaults to true), so they are covered.
+  if (error->domain == G_IO_ERROR) {
+    switch (error->code) {
+      case G_IO_ERROR_TIMED_OUT:
+      case G_IO_ERROR_HOST_NOT_FOUND:
+      case G_IO_ERROR_HOST_UNREACHABLE:
+      case G_IO_ERROR_NETWORK_UNREACHABLE:
+      case G_IO_ERROR_CONNECTION_REFUSED:
+      case G_IO_ERROR_CONNECTION_CLOSED:
+      case G_IO_ERROR_PARTIAL_INPUT:
+      case G_IO_ERROR_BUSY:
+        return true;
+      default:
+        return false;
+    }
+  }
+  return g_error_matches(error, G_RESOLVER_ERROR, G_RESOLVER_ERROR_NOT_FOUND) ||
+         g_error_matches(error, G_RESOLVER_ERROR, G_RESOLVER_ERROR_TEMPORARY_FAILURE);
+}
+
+// libostree reports its immediate per-request retries (e.g. on HTTP 502) only via g_debug, which is otherwise dropped.
+static void ostree_debug_log_handler(const gchar *log_domain, GLogLevelFlags log_level, const gchar *message,
+                                     gpointer user_data) {
+  if (g_str_has_prefix(message, "Should retry request")) {
+    LOG_WARNING << "libostree: " << Utils::redactUrlQueryStrings(message);
+  } else {
+    g_log_default_handler(log_domain, log_level, message, user_data);
+  }
+}
+
+static void installOstreeLogHandler() {
+  static std::once_flag once;
+  std::call_once(once, [] { g_log_set_handler("OSTree", G_LOG_LEVEL_DEBUG, ostree_debug_log_handler, nullptr); });
+}
+
+static bool waitBeforeRetry(std::chrono::milliseconds delay, const api::FlowControlToken *token) {
+  const auto deadline = std::chrono::steady_clock::now() + delay;
+  while (true) {
+    if (token != nullptr && !token->canContinue()) {
+      return false;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= deadline) {
+      return true;
+    }
+    std::this_thread::sleep_for(std::min<std::chrono::steady_clock::duration>(deadline - now,
+                                                                              std::chrono::milliseconds(200)));
+  }
+}
+
 data::InstallationResult OstreeManager::pull(const boost::filesystem::path &sysroot_path,
                                              const std::string &ostree_server, const KeyManager &keys,
                                              const Uptane::Target &target, const api::FlowControlToken *token,
                                              OstreeProgressCb progress_cb, const char *alt_remote,
-                                             boost::optional<std::unordered_map<std::string, std::string>> headers) {
+                                             boost::optional<std::unordered_map<std::string, std::string>> headers,
+                                             const OstreePullRetryPolicy &retry_policy) {
   if (!target.IsOstree()) {
     throw std::logic_error("Invalid type of Target, got " + target.type() + ", expected OSTREE");
   }
+  installOstreeLogHandler();
 
   const std::string refhash = target.sha256Hash();
   // NOLINTNEXTLINE(modernize-avoid-c-arrays, cppcoreguidelines-avoid-c-arrays, hicpp-avoid-c-arrays)
@@ -84,7 +167,6 @@ data::InstallationResult OstreeManager::pull(const boost::filesystem::path &sysr
   GError *error = nullptr;
   GVariantBuilder builder;
   GVariant *options;
-  GObjectUniquePtr<OstreeAsyncProgress> progress = nullptr;
 
   GObjectUniquePtr<OstreeSysroot> sysroot = OstreeManager::LoadSysroot(sysroot_path);
   GObjectUniquePtr<OstreeRepo> repo = LoadRepo(sysroot.get(), &error);
@@ -143,10 +225,32 @@ data::InstallationResult OstreeManager::pull(const boost::filesystem::path &sysr
 
   options = g_variant_builder_end(&builder);
 
-  PullMetaStruct mt(target, token, g_cancellable_new(), std::move(progress_cb));
-  progress.reset(ostree_async_progress_new_and_connect(aktualizr_progress_cb, &mt));
-  if (ostree_repo_pull_with_options(repo.get(), alt_remote == nullptr ? remote : alt_remote, options, progress.get(),
-                                    mt.cancellable.get(), &error) == 0) {
+  for (uint32_t retry = 1;; ++retry) {
+    PullMetaStruct mt(target, token, g_cancellable_new(), progress_cb);
+    // Declared after mt so it is destroyed (and its callback disconnected) first.
+    GObjectUniquePtr<OstreeAsyncProgress> progress{ostree_async_progress_new_and_connect(aktualizr_progress_cb, &mt)};
+    if (ostree_repo_pull_with_options(repo.get(), alt_remote == nullptr ? remote : alt_remote, options,
+                                      progress.get(), mt.cancellable.get(), &error) != 0) {
+      ostree_async_progress_finish(progress.get());
+      break;
+    }
+    if (retry > retry_policy.retries || !OstreePullRetryPolicy::isRetryable(error)) {
+      break;
+    }
+    static thread_local std::mt19937 rng{std::random_device{}()};
+    const std::chrono::milliseconds delay = OstreePullRetryPolicy::jitter(retry_policy.delayBefore(retry), rng);
+    LOG_WARNING << "Error while pulling image: " << error->code << " "
+                << Utils::redactUrlQueryStrings(error->message) << "; retry " << retry << "/" << retry_policy.retries
+                << " in " << delay.count() << "ms";
+    g_error_free(error);
+    error = nullptr;
+    if (!waitBeforeRetry(delay, token)) {
+      g_variant_unref(options);
+      return data::InstallationResult(data::ResultCode::Numeric::kInstallFailed, "OSTree pull was aborted");
+    }
+  }
+
+  if (error != nullptr) {
     LOG_ERROR << "Error while pulling image: " << error->code << " " << error->message;
     // The remote pull URL is derived from config.ostree_server, which can be a signed URL; the
     // libostree error message may echo it, so redact query strings before this reaches a report.
@@ -156,7 +260,6 @@ data::InstallationResult OstreeManager::pull(const boost::filesystem::path &sysr
     g_variant_unref(options);
     return install_res;
   }
-  ostree_async_progress_finish(progress.get());
   g_variant_unref(options);
   return data::InstallationResult(data::ResultCode::Numeric::kOk, "Pulling OSTree image was successful");
 }
@@ -402,7 +505,8 @@ PackageManagerInterface::FetchResult OstreeManager::fetchTarget(const Uptane::Ta
     return PackageManagerInterface::fetchTarget(target, fetcher, keys, progress_cb, token);
   }
   const data::InstallationResult pull_result =
-      OstreeManager::pull(config.sysroot, config.ostree_server, keys, target, token, progress_cb);
+      OstreeManager::pull(config.sysroot, config.ostree_server, keys, target, token, progress_cb, nullptr, boost::none,
+                          OstreePullRetryPolicy::fromConfig(config));
   // error is a failure reason; keep it empty on success (description carries success text there).
   return {pull_result.isSuccess(), pull_result.isSuccess() ? "" : pull_result.description};
 }

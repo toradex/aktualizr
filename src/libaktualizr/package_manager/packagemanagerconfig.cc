@@ -15,6 +15,14 @@ void PackageConfig::updateFromPropertyTree(const boost::property_tree::ptree& pt
       CopyFromConfig(images_path, cp.first, pt);
     } else if (cp.first == "packages_file") {
       CopyFromConfig(packages_file, cp.first, pt);
+    } else if (cp.first == "ostree_pull_retry") {
+      CopyFromConfig(ostree_pull_retry, cp.first, pt);
+    } else if (cp.first == "ostree_pull_retries") {
+      CopyFromConfig(ostree_pull_retries, cp.first, pt);
+    } else if (cp.first == "ostree_pull_retry_delay") {
+      CopyFromConfig(ostree_pull_retry_delay, cp.first, pt);
+    } else if (cp.first == "ostree_pull_retry_max_delay") {
+      CopyFromConfig(ostree_pull_retry_max_delay, cp.first, pt);
     } else if (cp.first == "fake_need_reboot") {
       CopyFromConfig(fake_need_reboot, cp.first, pt);
     } else if (cp.first == "booted") {
@@ -32,6 +40,10 @@ void PackageConfig::writeToStream(std::ostream& out_stream) const {
   writeOption(out_stream, ostree_server, "ostree_server");
   writeOption(out_stream, images_path, "images_path");
   writeOption(out_stream, packages_file, "packages_file");
+  writeOption(out_stream, ostree_pull_retry, "ostree_pull_retry");
+  writeOption(out_stream, ostree_pull_retries, "ostree_pull_retries");
+  writeOption(out_stream, ostree_pull_retry_delay, "ostree_pull_retry_delay");
+  writeOption(out_stream, ostree_pull_retry_max_delay, "ostree_pull_retry_max_delay");
   writeOption(out_stream, fake_need_reboot, "fake_need_reboot");
   writeOption(out_stream, booted, "booted");
 

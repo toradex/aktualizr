@@ -115,6 +115,11 @@ struct PackageConfig {
   boost::filesystem::path images_path{"/var/sota/images"};
   boost::filesystem::path packages_file{"/usr/package.manifest"};
 
+  bool ostree_pull_retry{true};
+  uint32_t ostree_pull_retries{5};
+  uint32_t ostree_pull_retry_delay{5};
+  uint32_t ostree_pull_retry_max_delay{300};
+
   // Options for simulation
   bool fake_need_reboot{false};
   bool fake_fail_install{false};
